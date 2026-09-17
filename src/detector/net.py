@@ -28,7 +28,7 @@ __all__ = [
     "ProgressFn",
 ]
 
-USER_AGENT = f"detector/{__version__} (+https://github.com/scapking/detector-py)"
+USER_AGENT = f"detector/{__version__} (+https://github.com/scapking/detector-sdk)"
 MAX_REDIRECTS = 6
 ProgressFn = Optional[Callable[[str, int, Optional[int]], None]]
 

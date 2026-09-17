@@ -30,9 +30,9 @@ dependencies = ["maxminddb>=2.4.0"]
 dev = ["pytest>=7.4", "ruff>=0.6"]
 
 [project.urls]
-Homepage = "https://github.com/scapking/detector-py"
-Source = "https://github.com/scapking/detector-py"
-Issues = "https://github.com/scapking/detector-py/issues"
+Homepage = "https://github.com/scapking/detector-sdk"
+Source = "https://github.com/scapking/detector-sdk"
+Issues = "https://github.com/scapking/detector-sdk/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/detector"]
