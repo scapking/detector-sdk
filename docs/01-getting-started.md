@@ -3,7 +3,7 @@
 ## Install
 
 ```bash
-pip install detector-py        # distribution name; import name is `detector`
+pip install detector-sdk       # distribution name; import name is `detector`
 pip install -e .               # from a checkout
 ```
 
