@@ -12,52 +12,67 @@ from detector import AsyncDetector, close, configure, distance, info
 from .conftest import V4_ALIBABA, V4_CHINA, V4_CLOUDFLARE, V4_GOOGLE, V6_GOOGLE
 
 
+async def _info(target, **kwargs):
+    """The public default is JSON; these tests exercise the model objects."""
+    return await info(target, as_object=True, **kwargs)
+
+
+async def _distance(source, targets=None, **kwargs):
+    return await distance(source, targets, as_object=True, **kwargs)
+
+
 def test_info_single_and_batch() -> None:
     async def scenario() -> None:
-        one = await info(V4_GOOGLE)
+        one = await _info(V4_GOOGLE)
         assert one.found is True
         assert one.country.iso_code == "US"
 
-        many = await info([V4_GOOGLE, V4_CHINA, "not-an-ip"])
+        many = await _info([V4_GOOGLE, V4_CHINA, "not-an-ip"])
         assert [row.ip for row in many] == [V4_GOOGLE, V4_CHINA, "not-an-ip"]
         assert [row.found for row in many] == [True, True, False]
 
-        streamed = await info(ip for ip in (V4_GOOGLE, V6_GOOGLE))
+        streamed = await _info(ip for ip in (V4_GOOGLE, V6_GOOGLE))
         assert [row.ip for row in streamed] == [V4_GOOGLE, V6_GOOGLE]
 
-        as_dict = await info(V4_GOOGLE, as_dict=True)
-        assert as_dict["country"]["iso_code"] == "US"
+        # default output is the standard JSON document
+        document = await info(V4_GOOGLE)
+        assert isinstance(document, dict)
+        assert document["country"]["iso_code"] == "US"
+        assert isinstance(await info([V4_GOOGLE, V4_CHINA]), list)
+        assert isinstance((await info([V4_GOOGLE]))[0], dict)
 
     asyncio.run(scenario())
 
 
 def test_distance_single_pair_and_matrix() -> None:
     async def scenario() -> None:
-        single = await distance(V4_GOOGLE, V4_CLOUDFLARE)
+        single = await _distance(V4_GOOGLE, V4_CLOUDFLARE)
         assert single.available and single.km > 1000
 
-        one_to_n = await distance(V4_GOOGLE, [V4_CLOUDFLARE, V4_ALIBABA])
+        one_to_n = await _distance(V4_GOOGLE, [V4_CLOUDFLARE, V4_ALIBABA])
         assert [row.target for row in one_to_n] == [V4_CLOUDFLARE, V4_ALIBABA]
 
-        matrix = await distance([V4_GOOGLE, V4_CHINA], [V4_CLOUDFLARE])
+        matrix = await _distance([V4_GOOGLE, V4_CHINA], [V4_CLOUDFLARE])
         assert [(row.source, row.target) for row in matrix] == [
             (V4_GOOGLE, V4_CLOUDFLARE),
             (V4_CHINA, V4_CLOUDFLARE),
         ]
 
-        generator = await distance(V4_GOOGLE, (ip for ip in [V4_CHINA, V6_GOOGLE]))
+        generator = await _distance(V4_GOOGLE, (ip for ip in [V4_CHINA, V6_GOOGLE]))
         assert len(generator) == 2
 
-        as_dict = await distance(V4_GOOGLE, V4_CLOUDFLARE, as_dict=True)
-        assert as_dict["distance_km"] == single.km
+        document = await distance(V4_GOOGLE, V4_CLOUDFLARE)
+        assert isinstance(document, dict)
+        assert document["distance_km"] == single.km
+        assert isinstance((await distance(V4_GOOGLE, [V4_CHINA]))[0], dict)
 
     asyncio.run(scenario())
 
 
 def test_method_selection() -> None:
     async def scenario() -> None:
-        fast = await distance(V4_GOOGLE, V4_CHINA, method="haversine")
-        exact = await distance(V4_GOOGLE, V4_CHINA, method="vincenty")
+        fast = await _distance(V4_GOOGLE, V4_CHINA, method="haversine")
+        exact = await _distance(V4_GOOGLE, V4_CHINA, method="vincenty")
         assert exact.method == "vincenty"
         assert abs(fast.km - exact.km) / exact.km < 0.01
 
@@ -66,14 +81,14 @@ def test_method_selection() -> None:
 
 def test_options_per_call_and_via_configure() -> None:
     async def scenario() -> None:
-        only_city = await info(V4_GOOGLE, datasets=["dbip-city"], include_raw=False)
+        only_city = await _info(V4_GOOGLE, datasets=["dbip-city"], include_raw=False)
         assert only_city.country.iso_code == "US"
         assert only_city.asn is None          # no ASN dataset loaded
         assert only_city.raw == {}
 
         configure(locales=("en",), include_all_names=False)
         try:
-            trimmed = await info(V4_CHINA)
+            trimmed = await _info(V4_CHINA)
             assert trimmed.to_dict()["country"]["names"] == {"en": "China"}
         finally:
             configure()
@@ -136,7 +151,7 @@ def test_async_does_not_block_the_loop() -> None:
                 ticks += 1
 
         task = asyncio.create_task(ticker())
-        await info([V4_GOOGLE, V4_CLOUDFLARE, V4_CHINA] * 20)
+        await _info([V4_GOOGLE, V4_CLOUDFLARE, V4_CHINA] * 20)
         task.cancel()
         return ticks
 
@@ -176,11 +191,11 @@ def test_sharded_clients_agree_with_one_client(detector) -> None:
 def test_pooled_client_is_reused_across_calls() -> None:
     async def scenario():
         started = time.perf_counter()
-        await info(V4_GOOGLE, datasets=["dbip-city"])
+        await _info(V4_GOOGLE, datasets=["dbip-city"])
         first = time.perf_counter() - started
         started = time.perf_counter()
         for _ in range(50):
-            await info(V4_GOOGLE, datasets=["dbip-city"])
+            await _info(V4_GOOGLE, datasets=["dbip-city"])
         return first, (time.perf_counter() - started) / 50
 
     first, subsequent = asyncio.run(scenario())

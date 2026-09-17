@@ -241,14 +241,21 @@ def test_dataset_filtering() -> None:
         without.close()
 
 
-def test_module_level_info_uses_a_pooled_client() -> None:
-    result = asyncio.run(info(V4_GOOGLE))
-    assert result.found is True
-    assert result.country.iso_code == "US"
+def test_public_default_is_standard_json() -> None:
+    """`await info(ip)` returns the JSON document, not a model object."""
+    document = asyncio.run(info(V4_GOOGLE))
+    assert isinstance(document, dict)
+    assert document["ip"] == V4_GOOGLE
+    assert document["country"]["iso_code"] == "US"
+    assert set(document) >= {"ip", "country", "asn", "cross_check", "raw", "meta"}
 
     batch = asyncio.run(info([V4_GOOGLE, V4_CLOUDFLARE]))
-    assert [row.ip for row in batch] == [V4_GOOGLE, V4_CLOUDFLARE]
-    assert asyncio.run(info(V4_GOOGLE, as_dict=True))["country"]["iso_code"] == "US"
+    assert isinstance(batch, list) and all(isinstance(row, dict) for row in batch)
+    assert [row["ip"] for row in batch] == [V4_GOOGLE, V4_CLOUDFLARE]
+
+    model = asyncio.run(info(V4_GOOGLE, as_object=True))
+    assert type(model).__name__ == "IPInfo"
+    assert model.country.iso_code == "US"
 
 
 def test_describe_and_stats(detector: Detector) -> None:

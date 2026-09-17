@@ -132,15 +132,25 @@ def test_distance_between_prebuilt_infos(detector: Detector) -> None:
 
 
 def test_two_public_functions_handle_every_shape() -> None:
-    """info/distance each take a single value or a batch - no extra functions."""
+    """info/distance each take a single value or a batch - no extra functions.
+
+    Default output is the standard JSON document; ``as_object=True`` gives models.
+    """
     single = asyncio.run(distance(V4_GOOGLE, V4_CLOUDFLARE))
-    assert isinstance(single, Distance) and single.available
+    assert isinstance(single, dict)
+    assert single["distance_km"] > 1000
+    assert set(single) >= {"source", "target", "distance_km", "distance_mi", "reason"}
 
     many = asyncio.run(distance(V4_GOOGLE, [V4_CLOUDFLARE, V4_CHINA]))
-    assert len(many) == 2 and all(row.available for row in many)
+    assert isinstance(many, list) and all(isinstance(row, dict) for row in many)
+    assert len(many) == 2
 
     matrix = asyncio.run(distance([V4_GOOGLE, V4_CHINA], [V4_CLOUDFLARE]))
-    assert len(matrix) == 2
+    assert [(row["source"], row["target"]) for row in matrix] == [
+        (V4_GOOGLE, V4_CLOUDFLARE),
+        (V4_CHINA, V4_CLOUDFLARE),
+    ]
 
-    as_dict = asyncio.run(distance(V4_GOOGLE, V4_CLOUDFLARE, as_dict=True))
-    assert as_dict["distance_km"] == single.km
+    model = asyncio.run(distance(V4_GOOGLE, V4_CLOUDFLARE, as_object=True))
+    assert isinstance(model, Distance) and model.available
+    assert model.km == single["distance_km"]

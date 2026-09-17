@@ -100,6 +100,16 @@ class AsyncDetector:
     def databases(self) -> List[Any]:
         return self._geo.databases
 
+    @property
+    def dataset_keys(self) -> List[str]:
+        """Loaded dataset keys, de-duplicated."""
+        return self._geo.dataset_keys
+
+    @property
+    def database_uids(self) -> List[str]:
+        """One uid per loaded file (split datasets contribute several)."""
+        return self._geo.database_uids
+
     # ------------------------------------------------------------------ #
     # Internals
     # ------------------------------------------------------------------ #

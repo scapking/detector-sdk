@@ -7,33 +7,30 @@ error types.
 from detector import info, distance, configure, close
 ```
 
-## info(target, *, as_dict=False, **options)
+## info(target, *, as_object=False, **options)
 
 Information for one address or a batch, merged from every loaded database.
-Dispatches on the input type:
+Dispatches on the input type. **Default output is the standard JSON document**:
 
-| target | returns |
-|---|---|
-| single IP-like value (`str`, `bytes`, `int`, `IPv4Address`, `IPv6Address`, `IPInfo`) | `IPInfo` |
-| iterable / generator of the above | `list[IPInfo]`, input order preserved |
-| async iterable | `list[IPInfo]` |
-| JSON envelope (`dict`, list of dicts, JSON string) | `Response` |
-
-`as_dict=True` returns plain dictionaries instead of model objects.
-
-## distance(source, targets=None, *, as_dict=False, method=None, **options)
-
-| source | targets | returns |
+| target | returns (default) | `as_object=True` |
 |---|---|---|
-| single | single | `Distance` |
-| single | iterable / generator | `list[Distance]` (N unbounded) |
-| iterable | iterable | `list[Distance]` (full N x M product) |
-| single JSON envelope | - | `Response` |
+| single IP-like value (`str`, `bytes`, `int`, `IPv4Address`, `IPv6Address`, `IPInfo`) | `dict` | `IPInfo` |
+| iterable / generator / async iterable | `list[dict]`, input order preserved | `list[IPInfo]` |
+| JSON envelope (`dict`, list of dicts, JSON string) | `dict` (protocol response) | `Response` |
+
+## distance(source, targets=None, *, as_object=False, method=None, **options)
+
+| source | targets | returns (default) | `as_object=True` |
+|---|---|---|---|
+| single | single | `dict` | `Distance` |
+| single | iterable / generator | `list[dict]` (N unbounded) | `list[Distance]` |
+| iterable | iterable | `list[dict]` (full N x M product) | `list[Distance]` |
+| single JSON envelope | - | `dict` (protocol response) | `Response` |
 
 `method` selects the maths: `"haversine"` (default, ~1 us) or `"vincenty"`
-(WGS84 ellipsoid, ~30 us). `as_dict=True` returns dictionaries.
+(WGS84 ellipsoid, ~30 us).
 
-Rows that cannot be computed come back with `km=None` and a `reason`
+Rows that cannot be computed come back with `distance_km=None` and a `reason`
 (`no_location`, `invalid_ip`, `not_found`, `compute_failed`), so batch output
 stays aligned with the input.
 
@@ -61,9 +58,9 @@ stays aligned with the input.
 | `resolve_dns=False` | opt-in reverse DNS per lookup |
 | `max_concurrency=32`, `window=1024` | async batch tuning |
 
-## Result objects
+## Result models (`as_object=True`)
 
-`IPInfo` (returned by `info`)
+`IPInfo` (returned by `info(..., as_object=True)`)
 
 Attributes: `ip`, `version`, `found`, `network`, `networks`, `is_private`,
 `is_global`, `is_loopback`, `is_reserved`, `is_multicast`, `is_unspecified`,
@@ -78,7 +75,7 @@ Shortcuts: `country_code`, `continent_code`, `coordinates`, `asn_number`,
 Serialisation: `to_dict(locales=None, all_names=None)`, `to_json(indent=None)`,
 `to_flat_dict()`, `get("country.iso_code")`, `info["country"]`.
 
-`Distance` (returned by `distance`)
+`Distance` (returned by `distance(..., as_object=True)`)
 
 Fields: `source`, `target`, `km`, `mi`, `method`, `same_country`, `same_city`,
 `same_continent`, `same_asn`, `source_location`, `target_location`, `reason`.

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.1
+
+* **`info()` and `distance()` now return the standard JSON document (a plain
+  `dict`) by default** instead of model objects. Pass `as_object=True` for
+  `IPInfo` / `Distance` / `Response`.
+* `AsyncDetector` gained `dataset_keys` and `database_uids`.
+
+
 ## 0.2.0
 
 **Breaking: the public surface is now two coroutines.**

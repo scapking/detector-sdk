@@ -9,10 +9,11 @@ Distance between IPs is one call away, 1-to-1 or 1-to-N (N unbounded).
 ```python
 from detector import info, distance      # two coroutines, nothing else
 
-await info("8.8.8.8")                    # -> IPInfo
-await info(["8.8.8.8", "1.1.1.1"])       # -> [IPInfo, IPInfo]   (same function)
-await distance("8.8.8.8", "1.1.1.1")     # -> Distance
-await distance("8.8.8.8", ["1.1.1.1", "223.5.5.5"])   # -> [Distance, Distance]
+await info("8.8.8.8")                    # -> dict   (the standard JSON document)
+await info(["8.8.8.8", "1.1.1.1"])       # -> [dict, dict]      (same function)
+await info("8.8.8.8", as_object=True)    # -> IPInfo            (model, if you want it)
+await distance("8.8.8.8", "1.1.1.1")     # -> dict
+await distance("8.8.8.8", ["1.1.1.1", "223.5.5.5"])   # -> [dict, dict]
 ```
 
 * **11 datasets bundled** (every dataset ip-location-db publishes), 76 MB of xz,
@@ -21,9 +22,9 @@ await distance("8.8.8.8", ["1.1.1.1", "223.5.5.5"])   # -> [Distance, Distance]
   see which source said what before trusting a value
 * **Nothing is dropped**: unmapped vendor fields land in `traits`, complete
   per-database records land in `raw`
-* **Sync and async** APIs with the same surface (`lookup` / `alookup`,
-  `Detector` / `AsyncDetector`)
-* **English-only output**, stable field names, `null` for missing values
+* **Two async functions**: `info` and `distance`, each taking one address or a
+  batch, each returning the standard JSON document (`as_object=True` for models)
+* **JSON by default**, stable field names, `null` for missing values, English only
 * Dependencies: `maxminddb` only (stdlib everywhere else)
 
 ---
@@ -56,26 +57,27 @@ import asyncio
 from detector import info, distance
 
 async def main():
-    # information
-    one = await info("8.8.8.8")
-    one.country_code              # 'US'
-    one.city_name                 # 'Mountain View'
-    one.asn.organization          # 'Google LLC'
-    one.coordinates               # (37.422, -122.085)
-    one.cross_check["country"]    # what each of the 7 country sources answered
-    one.conflicts                 # ['asn_organization', 'location']
+    # information: the return value IS the standard JSON document
+    row = await info("8.8.8.8")
+    row["country"]["iso_code"]       # 'US'
+    row["city"]["name"]              # 'Mountain View'
+    row["asn"]["organization"]       # 'Google LLC'
+    row["location"]["latitude"]      # 37.422
+    row["cross_check"]["country"]    # what each of the 7 country sources answered
+    row["conflicts"]                 # ['asn_organization', 'location']
+    json.dumps(row)                  # already JSON-serialisable
 
     many = await info(["8.8.8.8", "1.1.1.1", "114.114.114.114"])
-    [row.country_code for row in many]            # ['US', 'AU', 'CN']
+    [item["country"]["iso_code"] for item in many]   # ['US', 'AU', 'CN']
 
-    streaming = await info(generator_of_millions)  # windowed, bounded memory
+    streaming = await info(generator_of_millions)    # windowed, bounded memory
 
-    document = await info("8.8.8.8", as_dict=True) # plain dict / standard JSON
-    one.to_json(indent=2)                          # or serialise the model
+    model = await info("8.8.8.8", as_object=True)    # IPInfo, attribute access
+    model.country.iso_code, model.city.name(), model.coordinates
 
-    # distance
-    await distance("8.8.8.8", "1.1.1.1")                    # Distance
-    await distance("8.8.8.8", ["1.1.1.1", "223.5.5.5"])     # [Distance]
+    # distance: same shape
+    await distance("8.8.8.8", "1.1.1.1")                    # dict
+    await distance("8.8.8.8", ["1.1.1.1", "223.5.5.5"])     # [dict, dict]
     await distance(["8.8.8.8"], ["1.1.1.1", "223.5.5.5"])   # N x M
     await distance("8.8.8.8", "1.1.1.1", method="vincenty") # WGS84 ellipsoid
 
@@ -95,21 +97,24 @@ The same two functions also accept the JSON envelope
 entry point:
 
 ```python
-await info({"type": "ipv4", "action": "info", "data": {"ip": "8.8.8.8"}})      # -> Response
+await info({"type": "ipv4", "action": "info", "data": {"ip": "8.8.8.8"}})      # -> dict
 await distance({"type": "ipv4", "action": "distance",
-                "data": {"ip": "8.8.8.8", "list": ["1.1.1.1"]}})               # -> Response
+                "data": {"ip": "8.8.8.8", "list": ["1.1.1.1"]}})               # -> dict
+# as_object=True gives the Response model instead
 ```
 
 ### Distance result
 
 ```python
 row = await distance("8.8.8.8", "1.1.1.1")
-row.km            # 11953.88   (haversine, default)
-row.mi            # 7427.79
-row.same_country  # False
-row.same_asn      # False
-float(row)        # usable in arithmetic
-str(row)          # '8.8.8.8 -> 1.1.1.1: 11,953.88 km'
+row["distance_km"]      # 11953.88   (haversine, default)
+row["distance_mi"]      # 7427.79
+row["same_country"]     # False
+row["same_asn"]         # False
+row["reason"]           # None when it could be computed
+
+model = await distance("8.8.8.8", "1.1.1.1", as_object=True)
+model.km, float(model), f"{model}"     # 11953.88, 11953.88, '8.8.8.8 -> 1.1.1.1: 11,953.88 km'
 ```
 
 ### Explicit clients

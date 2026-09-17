@@ -13,6 +13,12 @@ from .conftest import V4_ALIBABA, V4_CHINA, V4_CLOUDFLARE, V4_GOOGLE, V6_GOOGLE
 
 
 def run(payload, **kwargs):
+    """Envelope -> Response object (the tests below assert on the model)."""
+    return asyncio.run(info(payload, as_object=True, **kwargs))
+
+
+def run_dict(payload, **kwargs):
+    """Envelope -> the protocol document, which is the public default."""
     return asyncio.run(info(payload, **kwargs))
 
 
@@ -40,7 +46,7 @@ def test_action_aliases_resolve_to_english() -> None:
     for alias in ("distance", "dist", "距离"):
         response = asyncio.run(
             distance({"type": "auto", "action": alias,
-                      "data": {"ip": V4_GOOGLE, "list": [V4_CHINA]}})
+                      "data": {"ip": V4_GOOGLE, "list": [V4_CHINA]}}, as_object=True)
         )
         assert response.ok, alias
         assert response.action == "distance"
@@ -85,7 +91,8 @@ def test_distance_envelope() -> None:
                 "type": "ipv4",
                 "action": "distance",
                 "data": {"type": "ipv4", "ip": V4_GOOGLE, "list": [V4_CLOUDFLARE, V4_ALIBABA]},
-            }
+            },
+            as_object=True,
         )
     )
     assert response.ok
@@ -100,7 +107,8 @@ def test_distance_envelope() -> None:
 
 def test_distance_envelope_requires_targets() -> None:
     response = asyncio.run(
-        distance({"type": "auto", "action": "distance", "data": {"ip": V4_GOOGLE}})
+        distance({"type": "auto", "action": "distance", "data": {"ip": V4_GOOGLE}},
+                 as_object=True)
     )
     assert response.status == "error"
     assert response.error["code"] == "protocol_error"
@@ -120,7 +128,7 @@ def test_batch_envelope() -> None:
 
 def test_json_string_envelope() -> None:
     text = '{"type":"auto","action":"info","data":{"ip":"8.8.8.8"}}'
-    assert run(text, as_dict=True)["status"] == "ok"
+    assert run_dict(text)["status"] == "ok"
 
     response = run(text)
     assert response.ok and response.data["ip"] == "8.8.8.8"

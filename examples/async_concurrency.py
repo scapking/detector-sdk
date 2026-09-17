@@ -33,24 +33,23 @@ async def main() -> None:
     started = time.perf_counter()
     rows = await info(addresses(20_000), window=512)
     elapsed = time.perf_counter() - started
-    print(f"info(20k addresses) -> {len(rows)} records in {elapsed:.2f}s "
-          f"({elapsed / len(rows) * 1e6:.0f} us/ip), {sum(r.found for r in rows)} resolved")
+    resolved = sum(1 for row in rows if row["found"])
+    print(f"info(20k addresses) -> {len(rows)} documents in {elapsed:.2f}s "
+          f"({elapsed / len(rows) * 1e6:.0f} us/ip), {resolved} resolved")
 
-    # 2. AsyncDetector when you want explicit control over the client.
+    # 2. AsyncDetector when you want explicit control over the client object.
     async with await AsyncDetector.create(max_concurrency=32, window=1024, cache_size=8192) as client:
-        rows = await client.lookup_many(IPS)
-        for row in rows:
+        models = await client.lookup_many(IPS)          # model objects
+        for row in models:
             state = f"{row.country_code} {row.city_name}" if row.found else "error"
             print(f"  {row.ip:<26} {state}")
 
-        # 3. Distances from one address to many, then the closest ones.
+        # 3. Distances from one address, then the closest ones.
         ranked = await client.nearest("223.5.5.5", IPS[:6], limit=3)
         print("\nclosest to 223.5.5.5:")
         for rank, row in enumerate(ranked, 1):
             print(f"  {rank}. {row.target:<24} {row.km:>10,.1f} km")
 
-        # 4. Shard across OS processes for CPU-bound bulk work: every worker opens
-        #    its own memory maps, the OS page cache is shared.
         print(f"\nclient stats: {await client.stats()}")
 
 

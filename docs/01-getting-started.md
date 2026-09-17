@@ -30,20 +30,22 @@ import asyncio
 from detector import info, distance
 
 async def main():
-    one = await info("8.8.8.8")                     # -> IPInfo
-    many = await info(["8.8.8.8", "1.1.1.1"])       # -> [IPInfo, IPInfo]
-    stream = await info(generator_of_millions)      # -> [IPInfo, ...] bounded memory
-    document = await info("8.8.8.8", as_dict=True)  # -> dict (standard JSON)
+    one = await info("8.8.8.8")                     # -> dict  (standard JSON)
+    many = await info(["8.8.8.8", "1.1.1.1"])       # -> [dict, dict]
+    stream = await info(generator_of_millions)      # -> [dict, ...] bounded memory
+    model = await info("8.8.8.8", as_object=True)   # -> IPInfo
 
-    pair = await distance("8.8.8.8", "1.1.1.1")             # -> Distance
-    rows = await distance("8.8.8.8", ["1.1.1.1", "::1"])    # -> [Distance]
-    grid = await distance(["8.8.8.8"], ["::1"])             # -> [Distance]
+    pair = await distance("8.8.8.8", "1.1.1.1")             # -> dict
+    rows = await distance("8.8.8.8", ["1.1.1.1", "::1"])    # -> [dict, dict]
+    grid = await distance(["8.8.8.8"], ["::1"])             # -> [dict, dict]
 
 asyncio.run(main())
 ```
 
 That is the entire surface. No sync variants, no separate batch functions:
-`info` and `distance` detect whether you passed one value or many.
+`info` and `distance` detect whether you passed one value or many. **Both return
+plain JSON-ready data by default**; `as_object=True` gives you `IPInfo`,
+`Distance` and `Response` models with attribute access and helpers.
 
 Options are per call, or set once with `configure(...)`:
 

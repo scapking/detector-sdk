@@ -15,10 +15,10 @@ from detector import AsyncDetector, info, known_datasets
 
 async def main() -> None:
     registry = known_datasets()
-    print(f"{'key':<18}{'name':<20}{'licence':<28}{'files':<6}redistributable")
+    print(f"{'key':<18}{'name':<20}{'licence':<28}{'files':<7}redistributable")
     for key, entry in registry.items():
         print(f"{key:<18}{entry['name']:<20}{entry['license']:<28}"
-              f"{len(entry['files']):<6}{entry['redistributable']}")
+              f"{len(entry['files']):<7}{entry['redistributable']}")
 
     # Drop the licence-restricted datasets for a build you intend to publish:
     #   from detector import NON_REDISTRIBUTABLE_KEYS
@@ -40,8 +40,13 @@ async def main() -> None:
 
     # Selection also works through the two public functions.
     partial = await info("8.8.8.8", datasets=["dbip-city"], include_raw=False)
-    print(f"\ncity-only lookup -> country={partial.country_code} asn={partial.asn} "
-          f"cross_check={list(partial.cross_check)}")
+    print(f"\ncity-only lookup -> country={partial['country']['iso_code']} "
+          f"asn={partial['asn']} cross_check={list(partial['cross_check'])}")
+
+    # Every document carries its provenance: licence + sha256 per source file.
+    print("\nsource files behind this answer:")
+    for entry in partial["meta"]["databases"]:
+        print(f"  {entry['key']:<16}{entry['license']:<26}{entry['sha256'][:12]}…")
 
 
 if __name__ == "__main__":

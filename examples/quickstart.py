@@ -1,4 +1,4 @@
-"""The whole API in one file: two coroutines, single or batch.
+"""The whole API in one file: two coroutines, single or batch, JSON by default.
 
     python examples/quickstart.py
 """
@@ -10,47 +10,59 @@ import json
 
 from detector import close, configure, distance, info
 
+IPS = ["8.8.8.8", "1.1.1.1", "114.114.114.114", "2001:4860:4860::8888"]
+
 
 async def main() -> None:
-    # --- 1. information: one IP -------------------------------------------------
-    result = await info("8.8.8.8")
-    print(f"{result.ip}  IPv{result.version}  found={result.found}")
-    print(f"  location : {result.display}")
-    print(f"  country  : {result.country.iso_code} ({result.country.name()})")
-    print(f"  asn      : {result.asn.asn} {result.asn.organization}")
-    print(f"  coords   : {result.coordinates}")
-    print(f"  sources  : {len(result.sources)} databases")
+    # --- 1. one IP: the return value is the standard JSON document -------------
+    row = await info("8.8.8.8")
+    print(type(row).__name__, "-", len(row), "top-level keys")
+    print(f"  ip       : {row['ip']}  IPv{row['version']}  found={row['found']}")
+    print(f"  location : {row['display']}")
+    print(f"  country  : {row['country']['iso_code']} ({row['country']['name']})")
+    print(f"  asn      : {row['asn']['asn']} {row['asn']['organization']}")
+    print(f"  coords   : {row['location']['latitude']}, {row['location']['longitude']}")
+    print(f"  sources  : {len(row['sources'])} databases")
 
-    # --- 2. information: many IPs (same function) -------------------------------
-    rows = await info(["8.8.8.8", "1.1.1.1", "114.114.114.114", "2001:4860:4860::8888"])
-    for row in rows:
-        print(f"  {row.ip:<26} {row.country_code} {row.city_name:<15} {row.asn.asn}")
+    # --- 2. same function, a batch --------------------------------------------
+    for item in await info(IPS):
+        country = item["country"]["iso_code"] if item["country"] else "-"
+        city = item["city"]["name"] if item["city"] else "-"
+        asn = item["asn"]["asn"] if item["asn"] else "-"
+        print(f"  {item['ip']:<26} {country:<4} {city:<16} {asn}")
 
-    # --- 3. the standard JSON document -----------------------------------------
-    document = await info("8.8.8.8", as_dict=True)
-    print(f"\njson keys   : {len(document)} top-level fields")
-    print(f"cross-check : {json.dumps(document['cross_check']['country'])}")
-    print(f"conflicts   : {document['conflicts']}")
-    print(f"document    : {len(json.dumps(document))} bytes (raw + every language)")
+    # --- 3. cross-check: what every database says about the same address ------
+    print(f"\n  country votes : {json.dumps(row['cross_check']['country'])}")
+    print(f"  agent names   : {json.dumps(row['cross_check']['asn_organization'])}")
+    print(f"  agreement     : {json.dumps(row['agreement'])}")
+    print(f"  conflicts     : {row['conflicts']}")
 
-    # --- 4. distance: one pair --------------------------------------------------
-    row = await distance("8.8.8.8", "114.114.114.114")
-    print(f"\n{row}  ({row.mi:,.1f} mi, same_country={row.same_country})")
+    # --- 4. distance: one pair -------------------------------------------------
+    pair = await distance("8.8.8.8", "114.114.114.114")
+    print(f"\n  {pair['source']} -> {pair['target']}: {pair['distance_km']:,.2f} km "
+          f"({pair['distance_mi']:,.1f} mi)")
 
-    # --- 5. distance: one to N, or N to M --------------------------------------
+    # --- 5. distance: one to N, N to M, alternative maths ---------------------
     for item in await distance("8.8.8.8", ["1.1.1.1", "223.5.5.5"]):
-        print(f"  {item.target:<20} {item.km:>10,.1f} km  same_asn={item.same_asn}")
+        print(f"  {item['target']:<20} {item['distance_km']:>10,.1f} km  same_asn={item['same_asn']}")
+    for item in await distance(["8.8.8.8", "1.1.1.1"], ["223.5.5.5"], method="vincenty"):
+        print(f"  {item['source']:<12} -> {item['target']:<12} {item['distance_km']:>10,.1f} km "
+              f"({item['method']})")
 
-    for item in await distance(["8.8.8.8", "1.1.1.1"], ["223.5.5.5"]):
-        print(f"  {item.source:<12} -> {item.target:<12} {item.km:>10,.1f} km")
+    # --- 6. model objects when you prefer attributes --------------------------
+    model = await info("8.8.8.8", as_object=True)
+    print(f"\n  as_object : {type(model).__name__} {model.country.iso_code} "
+          f"{model.city.name()} {model.asn.asn} {model.coordinates}")
+    far = await distance("8.8.8.8", "1.1.1.1", as_object=True)
+    print(f"  as_object : {type(far).__name__} {far.km:,.2f} km ({far.mi:,.2f} mi) {far!s}")
 
-    # --- 6. options: per call, or once ----------------------------------------
-    lean = await info("8.8.8.8", include_raw=False, include_all_names=False, as_dict=True)
-    print(f"\nlean document: {len(json.dumps(lean))} bytes")
+    # --- 7. options: per call, or once ---------------------------------------
+    lean = await info("8.8.8.8", include_raw=False, include_all_names=False)
+    print(f"\n  lean document: {len(json.dumps(lean))} bytes (vs {len(json.dumps(row))})")
 
     configure(locales=("en",), include_raw=False)
     try:
-        print(f"configured   : {(await info('8.8.8.8')).city_name}")
+        print(f"  configured   : {(await info('8.8.8.8'))['city']['name']}")
     finally:
         configure()
 

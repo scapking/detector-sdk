@@ -69,12 +69,14 @@ Stable codes: `invalid_ip`, `protocol_error`, `unsupported_action`,
 ```python
 from detector import info, distance
 
-response = await info({"type": "ipv4", "action": "info", "data": {"ip": "8.8.8.8"}})
-response.ok                    # True
-response.data["country"]["iso_code"]
+document = await info({"type": "ipv4", "action": "info", "data": {"ip": "8.8.8.8"}})
+document["status"]                    # 'ok'
+document["data"]["country"]["iso_code"]
+
+response = await info(envelope, as_object=True)   # -> Response model
+response.ok, response.data["country"]["iso_code"]
 
 await info('{"type":"auto","action":"info","data":{"ip":"1.1.1.1"}}')   # JSON string in
-await info(envelope, as_dict=True)                                      # dict out
 await distance({"type": "ipv4", "action": "distance",
                 "data": {"ip": "8.8.8.8", "list": ["1.1.1.1"]}})
 

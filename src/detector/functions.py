@@ -14,9 +14,10 @@
 Both entry points also accept the JSON envelope, so the same two functions cover
 the protocol case::
 
-    await info({"type": "ipv4", "action": "info", "data": {"ip": "8.8.8.8"}})      # -> Response
+    await info({"type": "ipv4", "action": "info", "data": {"ip": "8.8.8.8"}})      # -> dict
     await distance({"type": "ipv4", "action": "distance",
-                    "data": {"ip": "8.8.8.8", "list": ["1.1.1.1"]}})               # -> Response
+                    "data": {"ip": "8.8.8.8", "list": ["1.1.1.1"]}})               # -> dict
+    # as_object=True gives the Response / IPInfo / Distance models instead
 
 Everything configurable is passed per call, or once through :func:`configure`.
 Clients are pooled per option set, so repeated calls with the same options reuse
@@ -129,6 +130,16 @@ async def _client(**options: Any) -> AsyncDetector:
     return client
 
 
+def _out(value: Any, as_object: bool) -> Any:
+    """Default output is plain JSON-ready data; ``as_object=True`` keeps models."""
+    if as_object:
+        return value
+    if isinstance(value, (list, tuple)):
+        return [_out(item, False) for item in value]
+    to_dict = getattr(value, "to_dict", None)
+    return to_dict() if callable(to_dict) else value
+
+
 def _protocol_payload(value: Any) -> Any:
     from .envelope import loads
 
@@ -139,57 +150,60 @@ def _protocol_payload(value: Any) -> Any:
     return value
 
 
-async def info(target: Any, *, as_dict: bool = False, **options: Any) -> Any:
+async def info(target: Any, *, as_object: bool = False, **options: Any) -> Any:
     """Information for one IP or a batch, merged from every loaded database.
 
-    * single IP-like value -> ``IPInfo``
-    * iterable / generator  -> ``list[IPInfo]`` (input order preserved)
-    * JSON envelope        -> :class:`~detector.envelope.Response`
+    Returns **the standard JSON document** (a plain ``dict``) by default:
 
-    ``as_dict=True`` returns plain dictionaries instead of model objects.
+    * single IP-like value -> ``dict``
+    * iterable / generator  -> ``list[dict]`` (input order preserved)
+    * JSON envelope        -> ``dict`` (the protocol response document)
+
+    Pass ``as_object=True`` to get the models instead: ``IPInfo``,
+    ``list[IPInfo]``, or :class:`~detector.envelope.Response`.
     """
     if _is_envelope(target):
         from .envelope import handle
 
         response = handle((await _client(**options)).sync, _protocol_payload(target))
-        return response.to_dict() if as_dict else response
+        return _out(response, as_object)
 
     client = await _client(**options)
     if _is_single(target):
-        result = await client.lookup(target)
-        return result.to_dict() if as_dict else result
+        return _out(await client.lookup(target), as_object)
 
-    collected = [item async for item in client.stream(_as_iterable(target))]
-    return [item.to_dict() for item in collected] if as_dict else collected
+    return _out([item async for item in client.stream(_as_iterable(target))], as_object)
 
 
 async def distance(
     source: Any,
     targets: Any = None,
     *,
-    as_dict: bool = False,
+    as_object: bool = False,
     method: Optional[str] = None,
     **options: Any,
 ) -> Any:
     """Distance between IPs, computed from each side's merged geolocation.
 
-    * single -> single : ``Distance``
-    * single -> N      : ``list[Distance]`` (N unbounded, generators accepted)
-    * N      -> M      : ``list[Distance]`` (full product)
-    * single JSON envelope (as ``source``) -> :class:`~detector.envelope.Response`
+    Returns the standard JSON document (a plain ``dict``) by default:
 
+    * single -> single : ``dict``
+    * single -> N      : ``list[dict]`` (N unbounded, generators accepted)
+    * N      -> M      : ``list[dict]`` (full product)
+    * single JSON envelope (as ``source``) -> ``dict`` (protocol response)
+
+    Pass ``as_object=True`` for ``Distance`` / ``list[Distance]`` / ``Response``.
     ``method`` selects the maths: ``"haversine"`` (default) or ``"vincenty"``.
     """
     if _is_envelope(source):
         from .envelope import handle
 
         response = handle((await _client(**options)).sync, _protocol_payload(source))
-        return response.to_dict() if as_dict else response
+        return _out(response, as_object)
 
     client = await _client(**options)
     if _is_single(source) and _is_single(targets):
-        result = await client.distance(source, targets, method=method)
-        return result.to_dict() if as_dict else result
+        return _out(await client.distance(source, targets, method=method), as_object)
 
     if _is_single(source):
         rows = await client.distance(source, _as_iterable(targets), method=method)
@@ -198,7 +212,7 @@ async def distance(
             _as_iterable(source), _as_iterable(targets), method=method
         )
     results: List[Distance] = [rows] if isinstance(rows, Distance) else list(rows)
-    return [row.to_dict() for row in results] if as_dict else results
+    return _out(results, as_object)
 
 
 def _as_iterable(value: Any) -> Iterable[Any]:
