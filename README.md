@@ -7,10 +7,12 @@ standardised English document — no API keys, no network, no extra downloads.
 Distance between IPs is one call away, 1-to-1 or 1-to-N (N unbounded).
 
 ```python
-from detector import lookup, distance
+from detector import info, distance      # two coroutines, nothing else
 
-lookup("8.8.8.8").to_dict()                     # all databases, one merged record
-distance("8.8.8.8", ["1.1.1.1", "223.5.5.5"])   # -> [Distance, Distance]
+await info("8.8.8.8")                    # -> IPInfo
+await info(["8.8.8.8", "1.1.1.1"])       # -> [IPInfo, IPInfo]   (same function)
+await distance("8.8.8.8", "1.1.1.1")     # -> Distance
+await distance("8.8.8.8", ["1.1.1.1", "223.5.5.5"])   # -> [Distance, Distance]
 ```
 
 * **11 datasets bundled** (every dataset ip-location-db publishes), 76 MB of xz,
@@ -47,67 +49,82 @@ everything loaded).
 
 ## Quick start
 
-```python
-from detector import lookup, lookup_many, distance, nearest
-
-info = lookup("2001:4860:4860::8888")
-
-info.country_code            # 'CA'            (top-level merged value)
-info.country.iso_code        # 'CA'
-info.city.name()             # 'Montreal'
-info.asn.organization        # 'Google LLC'
-info.coordinates             # (45.5019, -73.5674)
-info.cross_check["country"]  # {'DBIP-City-Lite': 'CA', 'User-Country': 'CA', ...}
-info.conflicts               # [] - sources agree
-
-info.to_dict()               # standard JSON document
-info.to_json(indent=2)       # same, as a string
-info.get("country.iso_code") # dotted access
-info.to_flat_dict()          # {"country.iso_code": "CA", ...}
-
-lookup_many(["8.8.8.8", "1.1.1.1", "not-an-ip"])   # batch, order preserved
-
-distance("8.8.8.8", "1.1.1.1")                     # -> Distance
-distance("8.8.8.8", ["1.1.1.1", "223.5.5.5"])      # -> list[Distance]
-nearest("8.8.8.8", big_list, limit=3)              # closest N
-```
-
-### Distance
-
-```python
-result = distance("8.8.8.8", "1.1.1.1")
-result.km           # 11917.42  (haversine, default)
-result.mi           # 7404.34
-result.same_country # False
-result.same_asn     # False
-float(result)       # 11917.42 - usable in arithmetic
-str(result)         # '8.8.8.8 -> 1.1.1.1: 11,917.42 km'
-```
-
-Two methods: `haversine` (default, ~1 µs, great-circle on a sphere) and
-`vincenty` (WGS84 ellipsoid, ~30 µs, millimetre accuracy). Geolocation error is
-tens to thousands of kilometres, so the default is deliberate.
-
-### Async
+Two coroutines, each polymorphic over single and batch input:
 
 ```python
 import asyncio
-from detector import alookup, adistance, AsyncDetector
+from detector import info, distance
 
 async def main():
-    info = await alookup("8.8.8.8")
-    rows = await adistance("8.8.8.8", ["1.1.1.1", "223.5.5.5"])
+    # information
+    one = await info("8.8.8.8")
+    one.country_code              # 'US'
+    one.city_name                 # 'Mountain View'
+    one.asn.organization          # 'Google LLC'
+    one.coordinates               # (37.422, -122.085)
+    one.cross_check["country"]    # what each of the 7 country sources answered
+    one.conflicts                 # ['asn_organization', 'location']
 
-    async with await AsyncDetector.create(max_concurrency=64) as detector:
-        results = await detector.lookup_many(ips)          # windowed, bounded memory
-        async for info in detector.stream(open("ips.txt")):
-            ...
+    many = await info(["8.8.8.8", "1.1.1.1", "114.114.114.114"])
+    [row.country_code for row in many]            # ['US', 'AU', 'CN']
+
+    streaming = await info(generator_of_millions)  # windowed, bounded memory
+
+    document = await info("8.8.8.8", as_dict=True) # plain dict / standard JSON
+    one.to_json(indent=2)                          # or serialise the model
+
+    # distance
+    await distance("8.8.8.8", "1.1.1.1")                    # Distance
+    await distance("8.8.8.8", ["1.1.1.1", "223.5.5.5"])     # [Distance]
+    await distance(["8.8.8.8"], ["1.1.1.1", "223.5.5.5"])   # N x M
+    await distance("8.8.8.8", "1.1.1.1", method="vincenty") # WGS84 ellipsoid
 
 asyncio.run(main())
 ```
 
-`AsyncDetector` runs MMAP lookups in a thread pool (never on the event loop) and
-uses native asyncio sockets for dataset downloads.
+Options go per call, or once:
+
+```python
+from detector import configure
+configure(datasets=["dbip-city", "dbip-asn"], locales=("en",), include_raw=False,
+          cache_size=8192, max_concurrency=64)
+```
+
+The same two functions also accept the JSON envelope
+(`{"type","action","data","status"}`), so a queue/socket consumer needs no extra
+entry point:
+
+```python
+await info({"type": "ipv4", "action": "info", "data": {"ip": "8.8.8.8"}})      # -> Response
+await distance({"type": "ipv4", "action": "distance",
+                "data": {"ip": "8.8.8.8", "list": ["1.1.1.1"]}})               # -> Response
+```
+
+### Distance result
+
+```python
+row = await distance("8.8.8.8", "1.1.1.1")
+row.km            # 11953.88   (haversine, default)
+row.mi            # 7427.79
+row.same_country  # False
+row.same_asn      # False
+float(row)        # usable in arithmetic
+str(row)          # '8.8.8.8 -> 1.1.1.1: 11,953.88 km'
+```
+
+### Explicit clients
+
+When you want the client object instead of the pooled one
+(`max_concurrency`, `window`, `nearest`, `describe`, `stats`, `update_datasets`):
+
+```python
+from detector import AsyncDetector
+
+async with await AsyncDetector.create(max_concurrency=64, window=1024) as client:
+    rows = await client.lookup_many(ips)
+    ranked = await client.nearest("223.5.5.5", candidates, limit=3)
+    print(await client.describe())
+```
 
 ## The standard output document
 
@@ -148,22 +165,23 @@ uses native asyncio sockets for dataset downloads.
 }
 ```
 
-Want a different locale order? `lookup("8.8.8.8", locales=("zh-CN", "en"))` — the
+Want a different locale order? `await info("8.8.8.8", locales=("zh-CN", "en"))` — the
 `names` dictionaries always carry every language the source provides.
 
 ## JSON protocol
 
-For callers that speak JSON rather than Python objects:
+The two functions take the envelope directly - `info()` for `action=info`,
+`distance()` for `action=distance` - and return a `Response`
+(`.ok`, `.status`, `.data`, `.error`, `.meta`, `.to_dict()`, `.to_json()`):
 
 ```python
-from detector import request, request_json
-
-response = request({"type": "ipv4", "action": "distance",
-                    "data": {"ip": "8.8.8.8", "list": ["1.1.1.1", "223.5.5.5"]}})
+response = await distance({"type": "ipv4", "action": "distance",
+                           "data": {"ip": "8.8.8.8", "list": ["1.1.1.1", "223.5.5.5"]}})
 response.ok        # True
-response.data      # {"ip": "8.8.8.8", "source": {...}, "list": [...], "summary": {...}}
+response.data      # {"ip": ..., "source": {...}, "list": [...], "summary": {...}}
 
-request_json('{"type":"ipv6","action":"info","data":{"ip":"2001:4860:4860::8888"}}')
+await info('{"type":"ipv6","action":"info","data":{"ip":"2001:4860:4860::8888"}}')
+await info(envelope, as_dict=True)     # plain dict instead of a Response
 ```
 
 `action` aliases (`lookup`, `query`, `dist`, ...) are accepted on input; the
@@ -241,12 +259,12 @@ Fresh files in the cache directory override the bundled copies automatically.
 
 | Need | How |
 |---|---|
-| Extra/vendor databases | `Detector(databases={...})`, or drop `.mmdb` into `DETECTOR_DB_DIR` |
-| Custom distance metric | `Detector(distance_method="vincenty")` or compute from `info.coordinates` |
+| Extra/vendor databases | `await info(ip, databases={...})`, or drop `.mmdb` into `DETECTOR_DB_DIR` |
+| Custom distance metric | `await distance(a, b, method="vincenty")`, or compute from `row.coordinates` |
 | Own JSON shape | `info.to_dict()` / `to_flat_dict()` and rebuild |
-| Caching strategy | `Detector(cache_size=N)` (`0` disables) |
-| Cleaner output | `include_raw=False`, `locales=("en",)` |
-| Process-wide defaults | `detector.configure(...)`, `set_default_geo(my_detector)` |
+| Caching strategy | `await info(ip, cache_size=N)` (`0` disables) |
+| Cleaner output | `await info(ip, include_raw=False, locales=("en",))` |
+| Process-wide defaults | `detector.configure(...)` |
 
 ## Performance notes
 
@@ -256,7 +274,7 @@ Fresh files in the cache directory override the bundled copies automatically.
   (~13 s).
 * A default lookup is ~477 µs (2.1k IP/s) over 11 datasets / 12 files; ~40 µs
   when the address is already in the LRU cache.
-* `stream()` and the async variant keep memory flat for arbitrarily long inputs;
+* Generators keep memory flat for arbitrarily long inputs: `await info(gen)`;
   `include_raw=False` trims documents from ~9.8 KB to ~5.8 KB.
 * Threads and multiprocessing inside the SDK were removed on purpose - both
   measured slower than sequential. Shard the input across processes instead
@@ -278,8 +296,8 @@ Fresh files in the cache directory override the bundled copies automatically.
 | `docs/08-troubleshooting.md` | when something looks wrong |
 | `docs/09-architecture.md` | module map, data flow, design decisions |
 
-Runnable examples live in `examples/` (`quickstart_sync.py`, `async_batch.py`,
-`json_protocol.py`, `bulk_streaming.py`, `custom_database.py`).
+Runnable examples live in `examples/` (`quickstart.py`, `async_concurrency.py`,
+`json_protocol.py`, `bulk_streaming.py`, `custom_database.py`, `show_output.py`).
 
 ## Licence
 

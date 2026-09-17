@@ -1,87 +1,131 @@
-"""Async API: same results as the sync client, plus concurrency behaviour."""
+"""The two public coroutines and the async client underneath them."""
 
 from __future__ import annotations
 
 import asyncio
+import time
 
 import pytest
 
-from detector import AsyncDetector, adistance, alookup, alookup_many
+from detector import AsyncDetector, close, configure, distance, info
 
 from .conftest import V4_ALIBABA, V4_CHINA, V4_CLOUDFLARE, V4_GOOGLE, V6_GOOGLE
 
 
-def test_alookup_module_helper() -> None:
-    info = asyncio.run(alookup(V4_GOOGLE))
-    assert info.found is True
-    assert info.country.iso_code == "US"
-
-
-def test_async_client_matches_sync(detector) -> None:
+def test_info_single_and_batch() -> None:
     async def scenario() -> None:
-        async with await AsyncDetector.create(cache_size=0) as async_detector:
-            first = await async_detector.lookup(V4_GOOGLE)
-            assert first.to_dict() == detector.lookup(V4_GOOGLE).to_dict()
-            assert await async_detector.describe() == detector.describe()
+        one = await info(V4_GOOGLE)
+        assert one.found is True
+        assert one.country.iso_code == "US"
+
+        many = await info([V4_GOOGLE, V4_CHINA, "not-an-ip"])
+        assert [row.ip for row in many] == [V4_GOOGLE, V4_CHINA, "not-an-ip"]
+        assert [row.found for row in many] == [True, True, False]
+
+        streamed = await info(ip for ip in (V4_GOOGLE, V6_GOOGLE))
+        assert [row.ip for row in streamed] == [V4_GOOGLE, V6_GOOGLE]
+
+        as_dict = await info(V4_GOOGLE, as_dict=True)
+        assert as_dict["country"]["iso_code"] == "US"
 
     asyncio.run(scenario())
 
 
-def test_async_batch_and_stream() -> None:
+def test_distance_single_pair_and_matrix() -> None:
     async def scenario() -> None:
-        async with await AsyncDetector.create(cache_size=0, window=2) as async_detector:
-            inputs = [V4_GOOGLE, V4_CLOUDFLARE, V4_CHINA, V6_GOOGLE, "bad"]
-            results = await async_detector.lookup_many(inputs)
-            assert [item.ip for item in results] == inputs
-            assert [item.found for item in results] == [True, True, True, True, False]
+        single = await distance(V4_GOOGLE, V4_CLOUDFLARE)
+        assert single.available and single.km > 1000
 
-            streamed = [item.ip async for item in async_detector.stream(inputs)]
+        one_to_n = await distance(V4_GOOGLE, [V4_CLOUDFLARE, V4_ALIBABA])
+        assert [row.target for row in one_to_n] == [V4_CLOUDFLARE, V4_ALIBABA]
+
+        matrix = await distance([V4_GOOGLE, V4_CHINA], [V4_CLOUDFLARE])
+        assert [(row.source, row.target) for row in matrix] == [
+            (V4_GOOGLE, V4_CLOUDFLARE),
+            (V4_CHINA, V4_CLOUDFLARE),
+        ]
+
+        generator = await distance(V4_GOOGLE, (ip for ip in [V4_CHINA, V6_GOOGLE]))
+        assert len(generator) == 2
+
+        as_dict = await distance(V4_GOOGLE, V4_CLOUDFLARE, as_dict=True)
+        assert as_dict["distance_km"] == single.km
+
+    asyncio.run(scenario())
+
+
+def test_method_selection() -> None:
+    async def scenario() -> None:
+        fast = await distance(V4_GOOGLE, V4_CHINA, method="haversine")
+        exact = await distance(V4_GOOGLE, V4_CHINA, method="vincenty")
+        assert exact.method == "vincenty"
+        assert abs(fast.km - exact.km) / exact.km < 0.01
+
+    asyncio.run(scenario())
+
+
+def test_options_per_call_and_via_configure() -> None:
+    async def scenario() -> None:
+        only_city = await info(V4_GOOGLE, datasets=["dbip-city"], include_raw=False)
+        assert only_city.country.iso_code == "US"
+        assert only_city.asn is None          # no ASN dataset loaded
+        assert only_city.raw == {}
+
+        configure(locales=("en",), include_all_names=False)
+        try:
+            trimmed = await info(V4_CHINA)
+            assert trimmed.to_dict()["country"]["names"] == {"en": "China"}
+        finally:
+            configure()
+
+    asyncio.run(scenario())
+
+
+def test_clients_are_pooled_per_option_set() -> None:
+    async def scenario() -> None:
+        from detector.functions import _client
+
+        first = await _client(include_raw=False)
+        second = await _client(include_raw=False)
+        third = await _client(include_raw=True)
+        assert first is second
+        assert first is not third
+        await close()
+
+    asyncio.run(scenario())
+
+
+def test_async_client_matches_sync_client(detector) -> None:
+    async def scenario() -> None:
+        async with await AsyncDetector.create(cache_size=0) as client:
+            assert (await client.lookup(V4_GOOGLE)).to_dict() == detector.lookup(V4_GOOGLE).to_dict()
+            assert await client.describe() == detector.describe()
+
+    asyncio.run(scenario())
+
+
+def test_async_stream_is_lazy_and_order_preserving() -> None:
+    async def scenario() -> None:
+        async with await AsyncDetector.create(cache_size=0, window=2) as client:
+            inputs = [V4_GOOGLE, V4_CLOUDFLARE, V4_CHINA, V6_GOOGLE, "bad"]
+            results = await client.lookup_many(inputs)
+            assert [row.ip for row in results] == inputs
+            assert [row.found for row in results] == [True, True, True, True, False]
+
+            streamed = [row.ip async for row in client.stream(inputs)]
             assert streamed == inputs
 
-    asyncio.run(scenario())
+            async def source():
+                for ip in inputs:
+                    yield ip
 
-
-def test_async_distance() -> None:
-    async def scenario() -> None:
-        async with await AsyncDetector.create(cache_size=0) as async_detector:
-            single = await async_detector.distance(V4_GOOGLE, V4_CLOUDFLARE)
-            assert single.available
-            many = await async_detector.distance(V4_GOOGLE, [V4_CLOUDFLARE, V4_ALIBABA])
-            assert len(many) == 2
-            ranked = await async_detector.nearest(V4_CHINA, [V4_GOOGLE, V4_ALIBABA], limit=1)
-            assert len(ranked) == 1
-
-    asyncio.run(scenario())
-
-
-def test_async_protocol() -> None:
-    async def scenario() -> None:
-        async with await AsyncDetector.create(cache_size=0) as async_detector:
-            response = await async_detector.request(
-                {"type": "ipv4", "action": "info", "data": {"ip": V4_GOOGLE}}
-            )
-            assert response.ok
-            text = await async_detector.request_json(
-                '{"type":"auto","action":"distance","data":{"ip":"8.8.8.8","list":["1.1.1.1"]}}'
-            )
-            assert '"status": "ok"' in text
-
-    asyncio.run(scenario())
-
-
-def test_async_module_helpers_share_client() -> None:
-    async def scenario() -> None:
-        infos = await alookup_many([V4_GOOGLE, V4_CHINA])
-        assert [item.country.iso_code for item in infos] == ["US", "CN"]
-        rows = await adistance(V4_GOOGLE, V4_CHINA)
-        assert rows.available
+            from_async_source = [row.ip async for row in client.stream(source())]
+            assert from_async_source == inputs
 
     asyncio.run(scenario())
 
 
 def test_async_does_not_block_the_loop() -> None:
-    """A concurrent ticker must keep running while a batch is processed."""
-
     async def scenario() -> int:
         ticks = 0
 
@@ -92,8 +136,7 @@ def test_async_does_not_block_the_loop() -> None:
                 ticks += 1
 
         task = asyncio.create_task(ticker())
-        async with await AsyncDetector.create(cache_size=0) as async_detector:
-            await async_detector.lookup_many([V4_GOOGLE, V4_CLOUDFLARE, V4_CHINA] * 20)
+        await info([V4_GOOGLE, V4_CLOUDFLARE, V4_CHINA] * 20)
         task.cancel()
         return ticks
 
@@ -102,32 +145,43 @@ def test_async_does_not_block_the_loop() -> None:
 
 def test_async_close_blocks_reuse() -> None:
     async def scenario() -> None:
-        async_detector = await AsyncDetector.create(cache_size=0)
-        await async_detector.lookup(V4_GOOGLE)
-        await async_detector.aclose()
+        client = await AsyncDetector.create(cache_size=0)
+        await client.lookup(V4_GOOGLE)
+        await client.aclose()
         with pytest.raises(RuntimeError):
-            await async_detector.lookup(V4_GOOGLE)
+            await client.lookup(V4_GOOGLE)
 
     asyncio.run(scenario())
 
 
 def test_windowed_batches_match_single_batch() -> None:
-    """Windowing is a memory bound, not a behaviour change."""
-
     async def scenario() -> None:
         inputs = [V4_GOOGLE, V4_CLOUDFLARE, V4_CHINA, V4_ALIBABA, V6_GOOGLE] * 20
         async with await AsyncDetector.create(cache_size=0, window=7) as windowed:
             chunked = await windowed.lookup_many(inputs)
         async with await AsyncDetector.create(cache_size=0, window=10000) as whole:
             single = await whole.lookup_many(inputs)
-        assert [item.to_dict() for item in chunked] == [item.to_dict() for item in single]
+        assert [row.to_dict() for row in chunked] == [row.to_dict() for row in single]
 
     asyncio.run(scenario())
 
 
 def test_sharded_clients_agree_with_one_client(detector) -> None:
-    """The documented scaling pattern: shard input, one client per worker."""
     inputs = [V4_GOOGLE, V4_CLOUDFLARE, V4_CHINA, V4_ALIBABA, V6_GOOGLE] * 6
     shards = [inputs[index::3] for index in range(3)]
-    sharded = sorted(info.ip for shard in shards for info in detector.lookup_many(shard))
-    assert sharded == sorted(info.ip for info in detector.lookup_many(inputs))
+    sharded = sorted(row.ip for shard in shards for row in detector.lookup_many(shard))
+    assert sharded == sorted(row.ip for row in detector.lookup_many(inputs))
+
+
+def test_pooled_client_is_reused_across_calls() -> None:
+    async def scenario():
+        started = time.perf_counter()
+        await info(V4_GOOGLE, datasets=["dbip-city"])
+        first = time.perf_counter() - started
+        started = time.perf_counter()
+        for _ in range(50):
+            await info(V4_GOOGLE, datasets=["dbip-city"])
+        return first, (time.perf_counter() - started) / 50
+
+    first, subsequent = asyncio.run(scenario())
+    assert subsequent < first + 0.01  # no repeated database opening

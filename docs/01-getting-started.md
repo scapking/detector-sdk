@@ -23,52 +23,41 @@ Override the locations:
 | `DETECTOR_CACHE_DIR` | where decompressed copies and refreshed datasets live |
 | `DETECTOR_DB_DIR` | replaces the bundled data directory entirely |
 
-## First lookup
-
-```python
-from detector import lookup
-
-info = lookup("8.8.8.8")
-print(info.ip, info.country.iso_code, info.city.name(), info.asn.organization)
-print(info.to_json(indent=2)[:200])
-```
-
-`lookup()` uses a lazily created process-wide client. That is the right default
-for scripts and small services. For control over datasets, caching and locale
-order, build your own client:
-
-```python
-from detector import Detector
-
-with Detector(locales=("en",), cache_size=8192) as detector:
-    info = detector.lookup("2001:4860:4860::8888")
-```
-
-## First distance
-
-```python
-from detector import distance
-
-distance("8.8.8.8", "1.1.1.1")                    # -> Distance
-distance("8.8.8.8", ["1.1.1.1", "223.5.5.5"])     # -> list[Distance]
-for row in distance("8.8.8.8", (ip for ip in open("ips.txt"))):   # unbounded
-    print(row.target, row.km)
-```
-
-## First async call
+## The two functions
 
 ```python
 import asyncio
-from detector import AsyncDetector
+from detector import info, distance
 
 async def main():
-    async with await AsyncDetector.create() as detector:
-        info = await detector.lookup("8.8.8.8")
-        rows = await detector.lookup_many(["8.8.8.8", "1.1.1.1", "114.114.114.114"])
-        return info, rows
+    one = await info("8.8.8.8")                     # -> IPInfo
+    many = await info(["8.8.8.8", "1.1.1.1"])       # -> [IPInfo, IPInfo]
+    stream = await info(generator_of_millions)      # -> [IPInfo, ...] bounded memory
+    document = await info("8.8.8.8", as_dict=True)  # -> dict (standard JSON)
 
-info, rows = asyncio.run(main())
+    pair = await distance("8.8.8.8", "1.1.1.1")             # -> Distance
+    rows = await distance("8.8.8.8", ["1.1.1.1", "::1"])    # -> [Distance]
+    grid = await distance(["8.8.8.8"], ["::1"])             # -> [Distance]
+
+asyncio.run(main())
 ```
+
+That is the entire surface. No sync variants, no separate batch functions:
+`info` and `distance` detect whether you passed one value or many.
+
+Options are per call, or set once with `configure(...)`:
+
+```python
+await info("8.8.8.8", datasets=["dbip-city"], locales=("en",), include_raw=False)
+
+from detector import configure
+configure(cache_size=8192, distance_method="vincenty", max_concurrency=64)
+```
+
+Clients are pooled per option set, so repeated calls reuse one memory-mapped
+client instead of reopening 12 databases. `await close()` releases them.
+
+## What you get per lookup
 
 ## What you get per lookup
 

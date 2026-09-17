@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 
 import pytest
 
-from detector import Detector, InvalidIPError, lookup, parse_ip
+from detector import Detector, InvalidIPError, info, parse_ip
 from detector.models import DEFAULT_LOCALES, SCHEMA_VERSION
 
 from .conftest import V4_CHINA, V4_CLOUDFLARE, V4_GOOGLE, V6_GOOGLE
@@ -240,10 +241,14 @@ def test_dataset_filtering() -> None:
         without.close()
 
 
-def test_module_level_helpers_share_one_client() -> None:
-    info = lookup(V4_GOOGLE)
-    assert info.found is True
-    assert info.country.iso_code == "US"
+def test_module_level_info_uses_a_pooled_client() -> None:
+    result = asyncio.run(info(V4_GOOGLE))
+    assert result.found is True
+    assert result.country.iso_code == "US"
+
+    batch = asyncio.run(info([V4_GOOGLE, V4_CLOUDFLARE]))
+    assert [row.ip for row in batch] == [V4_GOOGLE, V4_CLOUDFLARE]
+    assert asyncio.run(info(V4_GOOGLE, as_dict=True))["country"]["iso_code"] == "US"
 
 
 def test_describe_and_stats(detector: Detector) -> None:

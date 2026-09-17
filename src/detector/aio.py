@@ -17,17 +17,16 @@ Two equivalent styles::
         async for row in geo.stream(huge_iterable):
             ...
 
-    # 2. module-level helpers (share a lazily created client)
-    from detector import alookup, adistance
-    info = await alookup("8.8.8.8")
-    dist = await adistance("8.8.8.8", "1.1.1.1")
+    # 2. the two public coroutines (they build and pool a client for you)
+    from detector import info, distance
+    info = await info("8.8.8.8")
+    dist = await distance("8.8.8.8", "1.1.1.1")
 """
 
 from __future__ import annotations
 
 import asyncio
 import functools
-import threading
 from pathlib import Path
 from typing import (
     Any,
@@ -48,20 +47,7 @@ from .exceptions import InvalidIPError
 from .models import IPInfo
 from .update import update_datasets_async
 
-__all__ = [
-    "AsyncDetector",
-    "alookup",
-    "alookup_many",
-    "astream",
-    "adistance",
-    "adistance_many",
-    "anearest",
-    "arequest",
-    "arequest_json",
-    "aget_default_geo",
-    "aset_default_geo",
-    "configure_async",
-]
+__all__ = ["AsyncDetector"]
 
 DEFAULT_CONCURRENCY = 32
 DEFAULT_WINDOW = 1024
@@ -123,27 +109,6 @@ class AsyncDetector:
             raise RuntimeError("AsyncDetector is closed")
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(self._executor, functools.partial(func, *args, **kwargs))
-
-    async def _map_window(
-        self,
-        func: Any,
-        items: Sequence[Any],
-        *,
-        concurrency: Optional[int] = None,
-        window: Optional[int] = None,
-    ) -> List[Any]:
-        limit = asyncio.Semaphore(concurrency or self.max_concurrency)
-        size = window or self.window
-        results: List[Any] = []
-
-        async def one(value: Any) -> Any:
-            async with limit:
-                return await self._run(func, value)
-
-        for start in range(0, len(items), size):
-            chunk = items[start : start + size]
-            results.extend(await asyncio.gather(*(one(value) for value in chunk)))
-        return results
 
     # ------------------------------------------------------------------ #
     # Lookup
@@ -338,76 +303,3 @@ class AsyncDetector:
     def __repr__(self) -> str:  # pragma: no cover
         keys = ",".join(self._geo.dataset_keys)
         return f"<AsyncDetector datasets={keys} concurrency={self.max_concurrency}>"
-
-
-# --------------------------------------------------------------------------- #
-# Module-level async helpers (shared lazy client)
-# --------------------------------------------------------------------------- #
-
-_default_async: Optional[AsyncDetector] = None
-_default_async_lock = threading.Lock()
-_default_async_kwargs: Dict[str, Any] = {}
-
-
-def configure_async(**kwargs: Any) -> AsyncDetector:
-    """Replace the shared async client (kwargs go to :class:`Detector`)."""
-    global _default_async, _default_async_kwargs
-    with _default_async_lock:
-        _default_async_kwargs = dict(kwargs)
-        _default_async = AsyncDetector(**kwargs)
-    return _default_async
-
-
-def aset_default_geo(geo: Optional[AsyncDetector]) -> None:
-    global _default_async
-    with _default_async_lock:
-        _default_async = geo
-
-
-async def aget_default_geo() -> AsyncDetector:
-    """Return (creating on first use) the shared async client."""
-    global _default_async
-    if _default_async is None:
-        _default_async = await AsyncDetector.create(**_default_async_kwargs)
-    return _default_async
-
-
-async def alookup(ip: IPLike, **kwargs: Any) -> IPInfo:
-    return await (await aget_default_geo()).lookup(ip, **kwargs)
-
-
-async def alookup_many(ips: Iterable[IPLike], **kwargs: Any) -> List[IPInfo]:
-    return await (await aget_default_geo()).lookup_many(ips, **kwargs)
-
-
-def astream(ips: Iterable[IPLike], **kwargs: Any) -> AsyncIterator[IPInfo]:
-    async def iterator() -> AsyncIterator[IPInfo]:
-        geo = await aget_default_geo()
-        async for item in geo.stream(ips, **kwargs):
-            yield item
-
-    return iterator()
-
-
-async def adistance(
-    source: IPLike, targets: Union[IPLike, Iterable[IPLike]], **kwargs: Any
-) -> Union[Distance, List[Distance]]:
-    return await (await aget_default_geo()).distance(source, targets, **kwargs)
-
-
-async def adistance_many(
-    sources: Iterable[IPLike], targets: Iterable[IPLike], **kwargs: Any
-) -> List[Distance]:
-    return await (await aget_default_geo()).distance_many(sources, targets, **kwargs)
-
-
-async def anearest(source: IPLike, targets: Iterable[IPLike], **kwargs: Any) -> List[Distance]:
-    return await (await aget_default_geo()).nearest(source, targets, **kwargs)
-
-
-async def arequest(payload: Any) -> Response:
-    return await (await aget_default_geo()).request(payload)
-
-
-async def arequest_json(payload: Any) -> str:
-    return await (await aget_default_geo()).request_json(payload)

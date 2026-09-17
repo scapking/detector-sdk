@@ -64,18 +64,24 @@ Stable codes: `invalid_ip`, `protocol_error`, `unsupported_action`,
 
 ## Calling it
 
-```python
-from detector import request, request_json, Detector
+`info()` serves `action=info`, `distance()` serves `action=distance`:
 
-response = request({"type": "ipv4", "action": "info", "data": {"ip": "8.8.8.8"}})
-response.ok                  # True
+```python
+from detector import info, distance
+
+response = await info({"type": "ipv4", "action": "info", "data": {"ip": "8.8.8.8"}})
+response.ok                    # True
 response.data["country"]["iso_code"]
 
-request_json('{"type":"auto","action":"info","data":{"ip":"1.1.1.1"}}')  # JSON string out
+await info('{"type":"auto","action":"info","data":{"ip":"1.1.1.1"}}')   # JSON string in
+await info(envelope, as_dict=True)                                      # dict out
+await distance({"type": "ipv4", "action": "distance",
+                "data": {"ip": "8.8.8.8", "list": ["1.1.1.1"]}})
 
-detector = Detector()
-detector.handle(payload)          # plain dict
-detector.handle_json(payload)     # JSON string
+# low level, if you hold a client already
+client = await AsyncDetector.create()
+client.request(payload)        # -> Response
+client.handle_json(payload)    # -> JSON string
 ```
 
 Batch payloads: pass a list of request objects; you get one `action=batch`
@@ -116,7 +122,5 @@ resp.ok, resp.status, resp.action, resp.meta["elapsed_ms"]
 
 ## Async
 
-```python
-response = await async_detector.request(payload)
-text = await async_detector.request_json(payload)   # same, JSON out
-```
+Everything is async: `Response` is simply what those two coroutines return when
+you hand them an envelope.

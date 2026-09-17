@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import math
 
 import pytest
@@ -130,7 +131,16 @@ def test_distance_between_prebuilt_infos(detector: Detector) -> None:
     assert distance_between(left, right).km == detector.distance(V4_GOOGLE, V4_CHINA).km
 
 
-def test_module_level_distance() -> None:
-    results = distance(V4_GOOGLE, [V4_CLOUDFLARE, V4_CHINA])
-    assert len(results) == 2
-    assert all(item.available for item in results)
+def test_two_public_functions_handle_every_shape() -> None:
+    """info/distance each take a single value or a batch - no extra functions."""
+    single = asyncio.run(distance(V4_GOOGLE, V4_CLOUDFLARE))
+    assert isinstance(single, Distance) and single.available
+
+    many = asyncio.run(distance(V4_GOOGLE, [V4_CLOUDFLARE, V4_CHINA]))
+    assert len(many) == 2 and all(row.available for row in many)
+
+    matrix = asyncio.run(distance([V4_GOOGLE, V4_CHINA], [V4_CLOUDFLARE]))
+    assert len(matrix) == 2
+
+    as_dict = asyncio.run(distance(V4_GOOGLE, V4_CLOUDFLARE, as_dict=True))
+    assert as_dict["distance_km"] == single.km

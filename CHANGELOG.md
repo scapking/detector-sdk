@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.2.0
+
+**Breaking: the public surface is now two coroutines.**
+
+* ``info(target, *, as_dict=False, **options)`` - one IP or a batch (iterable,
+  generator, async iterable); returns ``IPInfo``, ``list[IPInfo]``, or a
+  ``Response`` for a JSON envelope.
+* ``distance(source, targets=None, *, as_dict=False, method=None, **options)`` -
+  1-to-1, 1-to-N (unbounded) or N-to-M; returns ``Distance`` / ``list[Distance]``.
+* Both accept the ``{"type","action","data","status"}`` envelope, so the separate
+  protocol helpers are gone.
+* Removed from the public API: ``lookup``, ``lookup_many``, ``stream``,
+  ``distance_many``, ``nearest``, ``request``, ``request_json``, every
+  ``alookup``-style async twin, ``configure_async``, ``set_default_geo`` and the
+  ``IPGeo``/``AsyncIPGeo`` aliases. The engine behind them is unchanged and still
+  reachable through ``Detector`` / ``AsyncDetector`` for callers who need
+  ``nearest``, ``describe``, ``stats`` or ``update_datasets`` on a client.
+* ``configure(**options)`` sets call defaults; clients are pooled per option set;
+  ``await close()`` releases them.
+
 ## 0.1.0
 
 Initial release.
