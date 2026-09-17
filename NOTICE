@@ -1,0 +1,78 @@
+detector — 第三方数据来源与许可
+================================
+
+本文档是 LICENSE 中"第三方数据许可"章节的详细版本。任何再分发（源码、
+wheel、Docker 镜像、二进制打包）都必须保留本文件与 LICENSE。
+
+1. 内置数据（随包分发，开箱即用，共 11 个数据集 / 12 个文件）
+------------------------------------------------------------
+
+数据集             文件                              许可                来源
+-----------------  --------------------------------  ------------------  --------------------------
+DBIP-City-Lite     dbip-city-lite.mmdb.xz            CC BY 4.0           https://db-ip.com
+DBIP-ASN-Lite      dbip-asn-lite.mmdb.xz             CC BY 4.0           https://db-ip.com
+DBIP-Country-Lite  dbip-country-lite.mmdb.xz         CC BY 4.0           https://db-ip.com
+GeoLite2-City      geolite2-city-ipv4/-ipv6.mmdb.xz  GeoLite2 EULA  ⚠    https://www.maxmind.com
+GeoLite2-ASN       geolite2-asn.mmdb.xz              GeoLite2 EULA  ⚠    https://www.maxmind.com
+GeoLite2-Country   geolite2-country.mmdb.xz          GeoLite2 EULA  ⚠    https://www.maxmind.com
+IPtoASN-ASN        iptoasn-asn.mmdb.xz               PDDL                ip-location-db
+IPtoASN-Country    iptoasn-country.mmdb.xz           PDDL                ip-location-db
+Origin-ASN         origin-asn.mmdb.xz                PDDL                ip-location-db
+User-Country       user-country.mmdb.xz              PDDL                ip-location-db
+Server-Country     server-country.mmdb.xz            PDDL                ip-location-db
+
+CC BY 4.0 允许商用、修改、再分发，唯一硬性要求是署名。署名文本：
+
+    IP Geolocation by DB-IP (https://db-ip.com)
+
+本 SDK 自动在标准化 JSON 的 meta.attribution 中插入该署名。
+
+2. GeoLite2 许可警告（重要）
+---------------------------------
+
+本构建按需求内置了 sapics/ip-location-db 发布版中的**全部**数据集，包括
+GeoLite2-City / ASN / Country。
+
+但 MaxMind 的 GeoLite2 EULA 禁止向第三方"披露"数据：把 GeoLite2 数据打包进
+wheel、Docker 镜像并对外分发，属于需要单独授权的行为（GeoLite2-City 商用
+再分发许可约 $10,000/年）。
+
+因此：
+  * 内部使用：可以，无需额外授权。
+  * 对外发布包含 GeoLite2 的产物：需要你自己取得 MaxMind 授权。
+  * 不想承担该风险：加载时排除，代码里用：
+
+        from detector import Detector, NON_REDISTRIBUTABLE_KEYS
+        Detector(exclude=NON_REDISTRIBUTABLE_KEYS)
+
+    或只挑可再分发的子集：
+
+        Detector(datasets=["dbip-city", "dbip-asn", "dbip-country",
+                           "iptoasn-asn", "iptoasn-country", "origin-asn",
+                           "user-country", "server-country"])
+
+`Detector.available_datasets()` 与 MANIFEST.json 里每个数据集都带
+`redistributable` 字段，可直接用于发布前的合规检查。
+
+3. 可选替换 / 叠加数据源
+-----------------------
+
+IPGeo(databases={"city": "/path/GeoLite2-City.mmdb", ...})
+
+任何符合 MaxMind DB (MMDB) v2.0 规范的文件都能直接被读取，包括：
+  * MaxMind GeoLite2 / GeoIP2 City / Country / ASN / Enterprise（自备授权）
+  * DB-IP Lite / DB-IP 商业库
+  * sapics/ip-location-db 发布的所有 dbip-* / geolite2-* / iptoasn-* /
+    user-country / server-country / origin-asn MMDB
+  * 你自己用 mmdb_writer 生成的私有库
+
+许可注意事项：
+  * sapics 仓库中的 geolite2-* 数据继承 MaxMind 许可，商用分发前请自查。
+  * user-country / server-country 为 PDDL / CC0，可自由分发。
+  * MaxMind GeoIP2（商业库）不可再分发，只能内部使用。
+
+4. 数据准确性免责
+-----------------
+
+IP 地理定位本质不精确，DB-IP Lite 为免费子集，精度低于商业库。
+禁止将本 SDK 输出用于识别具体家庭、个人或街道地址。

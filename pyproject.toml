@@ -1,0 +1,62 @@
+[build-system]
+requires = ["hatchling>=1.18"]
+build-backend = "hatchling.build"
+
+[project]
+name = "detector-py"
+version = "0.1.0"
+description = "离线 IP 情报 Python SDK：一次查询合并全部内置数据库，返回标准化 JSON，并支持 IP 间距离计算。"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "detector contributors" }]
+keywords = ["ip", "geoip", "mmdb", "geolocation", "distance", "offline", "sdk"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Internet",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = ["maxminddb>=2.4.0"]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.4", "ruff>=0.6"]
+
+[project.urls]
+Homepage = "https://github.com/scapking/detector-py"
+Source = "https://github.com/scapking/detector-py"
+Issues = "https://github.com/scapking/detector-py/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/detector"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src", "tests", "docs", "examples", "tools", "README.md", "LICENSE", "NOTICE"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 110
+target-version = "py39"
+
+[tool.ruff.lint]
+# UP* is disabled on purpose: the code targets Python 3.9, so Optional[...] /
+# Dict[...] stay instead of PEP 604 / PEP 585 syntax.
+select = ["E", "F", "I", "B", "RUF"]
+ignore = [
+  "UP",
+  "BLE001",   # blind except: deliberate in defensive cleanup paths
+  "S110",     # try/except/pass: same
+  "PYI034",   # __enter__/__exit__ typing style
+  "PYI036",
+  "RUF022",   # __all__ is grouped by purpose, not alphabetically
+]

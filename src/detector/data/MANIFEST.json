@@ -1,0 +1,283 @@
+{
+  "generator": "detector/0.1.0",
+  "generated_at": "2026-09-17T20:34:04Z",
+  "attribution": "Country/ASN data from the ip-location-db project (https://github.com/sapics/ip-location-db), PDDL licensed | IP Geolocation by DB-IP (https://db-ip.com) | This product includes GeoLite2 data created by MaxMind, available from https://www.maxmind.com",
+  "bundled": [
+    "dbip-city",
+    "dbip-asn",
+    "dbip-country",
+    "geolite2-city",
+    "geolite2-asn",
+    "geolite2-country",
+    "iptoasn-asn",
+    "iptoasn-country",
+    "origin-asn",
+    "user-country",
+    "server-country"
+  ],
+  "non_redistributable": [
+    "geolite2-city",
+    "geolite2-asn",
+    "geolite2-country"
+  ],
+  "sha256": {
+    "dbip-city-lite.mmdb.xz": "1e40ebf147ab622e5808d150b0ba53d046f88ac4070d1f2c6a911b4087165a08",
+    "dbip-asn-lite.mmdb.xz": "4549eb83428979d9bd0141cb56f93446c8c3ce35faf852eb6deb27f19f2cfc12",
+    "dbip-country-lite.mmdb.xz": "9072012177b4c9dc3655732f1fc7fa6a66cffa63b8e1aa5ae229c7ad48ba9a9a",
+    "geolite2-city-ipv4.mmdb.xz": "c9fcf0df252bbcbb923bfd6384d7a0bc9d56e75edb86daff6794d594f68902fb",
+    "geolite2-city-ipv6.mmdb.xz": "9b1968a1dd3fbab2d5a1a5cde59c0a0ef7571598904ed137bf5a8868247bd104",
+    "geolite2-asn.mmdb.xz": "dccbfaff8964344394f995474262ef511de2bc93b6407dee68875586547ebe96",
+    "geolite2-country.mmdb.xz": "5996b63fcf92133bec0f275dbdacd532ede4224a8c45acd98d0570125bafe8e0",
+    "iptoasn-asn.mmdb.xz": "2334af1ca890f4185280625144ded1e36a91ac621ea1155cdb8f25ce3726435c",
+    "iptoasn-country.mmdb.xz": "1564e4ec760fcf0abc907e8cc563415527b89015b1f905ffcd0d6e844d1fc735",
+    "origin-asn.mmdb.xz": "23bb902a7d121459850d1d3faa30a729709a68139862024762b65553ac12f536",
+    "user-country.mmdb.xz": "c3a63771a3ad7c0572b5355c9ddc72cd84f5e19f4aca1b738571fdc3c9960294",
+    "server-country.mmdb.xz": "8db8acb9eb66fa264d28070d61536d42e95ef82e76dbff9f128c116bcbb6116a"
+  },
+  "datasets": [
+    {
+      "key": "dbip-city",
+      "variant": "",
+      "name": "DBIP-City-Lite",
+      "file": "dbip-city-lite.mmdb.xz",
+      "kind": "city",
+      "database_type": "DBIP-City-Lite",
+      "license": "CC BY 4.0",
+      "attribution": "IP Geolocation by DB-IP (https://db-ip.com)",
+      "homepage": "https://db-ip.com/db/download/ip-to-city-lite",
+      "providers": [
+        "city",
+        "subdivision",
+        "country",
+        "continent",
+        "location"
+      ],
+      "redistributable": true,
+      "size": 39737108,
+      "build_date": "2026-09-01",
+      "sha256": "1e40ebf147ab622e5808d150b0ba53d046f88ac4070d1f2c6a911b4087165a08",
+      "packaged_at": "2026-09-17T20:33:56Z"
+    },
+    {
+      "key": "dbip-asn",
+      "variant": "",
+      "name": "DBIP-ASN-Lite",
+      "file": "dbip-asn-lite.mmdb.xz",
+      "kind": "asn",
+      "database_type": "DBIP-ASN-Lite",
+      "license": "CC BY 4.0",
+      "attribution": "IP Geolocation by DB-IP (https://db-ip.com)",
+      "homepage": "https://db-ip.com/db/download/ip-to-asn-lite",
+      "providers": [
+        "asn"
+      ],
+      "redistributable": true,
+      "size": 3319304,
+      "build_date": "2026-09-01",
+      "sha256": "4549eb83428979d9bd0141cb56f93446c8c3ce35faf852eb6deb27f19f2cfc12",
+      "packaged_at": "2026-09-17T20:33:57Z"
+    },
+    {
+      "key": "dbip-country",
+      "variant": "",
+      "name": "DBIP-Country-Lite",
+      "file": "dbip-country-lite.mmdb.xz",
+      "kind": "country",
+      "database_type": "DBIP-Country-Lite",
+      "license": "CC BY 4.0",
+      "attribution": "IP Geolocation by DB-IP (https://db-ip.com)",
+      "homepage": "https://db-ip.com/db/download/ip-to-country-lite",
+      "providers": [
+        "country",
+        "continent"
+      ],
+      "redistributable": true,
+      "size": 2252408,
+      "build_date": "2026-09-01",
+      "sha256": "9072012177b4c9dc3655732f1fc7fa6a66cffa63b8e1aa5ae229c7ad48ba9a9a",
+      "packaged_at": "2026-09-17T20:33:58Z"
+    },
+    {
+      "key": "geolite2-city",
+      "variant": "ipv4",
+      "name": "GeoLite2-City",
+      "file": "geolite2-city-ipv4.mmdb.xz",
+      "kind": "city",
+      "database_type": "GeoLite2-City",
+      "license": "GeoLite2 EULA (MaxMind)",
+      "attribution": "This product includes GeoLite2 data created by MaxMind, available from https://www.maxmind.com",
+      "homepage": "https://github.com/sapics/ip-location-db/tree/main/geolite2-city",
+      "providers": [
+        "city",
+        "subdivision",
+        "country",
+        "continent",
+        "location",
+        "postal"
+      ],
+      "redistributable": false,
+      "size": 10626440,
+      "build_date": "2026-09-16",
+      "sha256": "c9fcf0df252bbcbb923bfd6384d7a0bc9d56e75edb86daff6794d594f68902fb",
+      "packaged_at": "2026-09-17T20:33:59Z"
+    },
+    {
+      "key": "geolite2-city",
+      "variant": "ipv6",
+      "name": "GeoLite2-City",
+      "file": "geolite2-city-ipv6.mmdb.xz",
+      "kind": "city",
+      "database_type": "GeoLite2-City",
+      "license": "GeoLite2 EULA (MaxMind)",
+      "attribution": "This product includes GeoLite2 data created by MaxMind, available from https://www.maxmind.com",
+      "homepage": "https://github.com/sapics/ip-location-db/tree/main/geolite2-city",
+      "providers": [
+        "city",
+        "subdivision",
+        "country",
+        "continent",
+        "location",
+        "postal"
+      ],
+      "redistributable": false,
+      "size": 4742076,
+      "build_date": "2026-09-16",
+      "sha256": "9b1968a1dd3fbab2d5a1a5cde59c0a0ef7571598904ed137bf5a8868247bd104",
+      "packaged_at": "2026-09-17T20:34:00Z"
+    },
+    {
+      "key": "geolite2-asn",
+      "variant": "",
+      "name": "GeoLite2-ASN",
+      "file": "geolite2-asn.mmdb.xz",
+      "kind": "asn",
+      "database_type": "GeoLite2-ASN",
+      "license": "GeoLite2 EULA (MaxMind)",
+      "attribution": "This product includes GeoLite2 data created by MaxMind, available from https://www.maxmind.com",
+      "homepage": "https://github.com/sapics/ip-location-db/tree/main/geolite2-asn",
+      "providers": [
+        "asn"
+      ],
+      "redistributable": false,
+      "size": 3814164,
+      "build_date": "2026-09-16",
+      "sha256": "dccbfaff8964344394f995474262ef511de2bc93b6407dee68875586547ebe96",
+      "packaged_at": "2026-09-17T20:34:01Z"
+    },
+    {
+      "key": "geolite2-country",
+      "variant": "",
+      "name": "GeoLite2-Country",
+      "file": "geolite2-country.mmdb.xz",
+      "kind": "country",
+      "database_type": "GeoLite2-Country",
+      "license": "GeoLite2 EULA (MaxMind)",
+      "attribution": "This product includes GeoLite2 data created by MaxMind, available from https://www.maxmind.com",
+      "homepage": "https://github.com/sapics/ip-location-db/tree/main/geolite2-country",
+      "providers": [
+        "country",
+        "continent"
+      ],
+      "redistributable": false,
+      "size": 2113864,
+      "build_date": "2026-09-16",
+      "sha256": "5996b63fcf92133bec0f275dbdacd532ede4224a8c45acd98d0570125bafe8e0",
+      "packaged_at": "2026-09-17T20:34:01Z"
+    },
+    {
+      "key": "iptoasn-asn",
+      "variant": "",
+      "name": "IPtoASN-ASN",
+      "file": "iptoasn-asn.mmdb.xz",
+      "kind": "asn",
+      "database_type": "IPtoASN-ASN",
+      "license": "PDDL",
+      "attribution": "Country/ASN data from the ip-location-db project (https://github.com/sapics/ip-location-db), PDDL licensed",
+      "homepage": "https://github.com/sapics/ip-location-db/tree/main/iptoasn-asn",
+      "providers": [
+        "asn"
+      ],
+      "redistributable": true,
+      "size": 3363244,
+      "build_date": "2026-09-16",
+      "sha256": "2334af1ca890f4185280625144ded1e36a91ac621ea1155cdb8f25ce3726435c",
+      "packaged_at": "2026-09-17T20:34:02Z"
+    },
+    {
+      "key": "iptoasn-country",
+      "variant": "",
+      "name": "IPtoASN-Country",
+      "file": "iptoasn-country.mmdb.xz",
+      "kind": "country",
+      "database_type": "IPtoASN-Country",
+      "license": "PDDL",
+      "attribution": "Country/ASN data from the ip-location-db project (https://github.com/sapics/ip-location-db), PDDL licensed",
+      "homepage": "https://github.com/sapics/ip-location-db/tree/main/iptoasn-country",
+      "providers": [
+        "country"
+      ],
+      "redistributable": true,
+      "size": 1316752,
+      "build_date": "2026-09-16",
+      "sha256": "1564e4ec760fcf0abc907e8cc563415527b89015b1f905ffcd0d6e844d1fc735",
+      "packaged_at": "2026-09-17T20:34:02Z"
+    },
+    {
+      "key": "origin-asn",
+      "variant": "",
+      "name": "Origin-ASN",
+      "file": "origin-asn.mmdb.xz",
+      "kind": "asn",
+      "database_type": "Origin-ASN",
+      "license": "PDDL",
+      "attribution": "Country/ASN data from the ip-location-db project (https://github.com/sapics/ip-location-db), PDDL licensed",
+      "homepage": "https://github.com/sapics/ip-location-db/tree/main/origin-asn",
+      "providers": [
+        "asn"
+      ],
+      "redistributable": true,
+      "size": 3714768,
+      "build_date": "2026-09-16",
+      "sha256": "23bb902a7d121459850d1d3faa30a729709a68139862024762b65553ac12f536",
+      "packaged_at": "2026-09-17T20:34:03Z"
+    },
+    {
+      "key": "user-country",
+      "variant": "",
+      "name": "User-Country",
+      "file": "user-country.mmdb.xz",
+      "kind": "country",
+      "database_type": "User-Country",
+      "license": "PDDL",
+      "attribution": "Country/ASN data from the ip-location-db project (https://github.com/sapics/ip-location-db), PDDL licensed",
+      "homepage": "https://github.com/sapics/ip-location-db/tree/main/user-country",
+      "providers": [
+        "country"
+      ],
+      "redistributable": true,
+      "size": 1904952,
+      "build_date": "2026-09-16",
+      "sha256": "c3a63771a3ad7c0572b5355c9ddc72cd84f5e19f4aca1b738571fdc3c9960294",
+      "packaged_at": "2026-09-17T20:34:03Z"
+    },
+    {
+      "key": "server-country",
+      "variant": "",
+      "name": "Server-Country",
+      "file": "server-country.mmdb.xz",
+      "kind": "country",
+      "database_type": "Server-Country",
+      "license": "PDDL",
+      "attribution": "Country/ASN data from the ip-location-db project (https://github.com/sapics/ip-location-db), PDDL licensed",
+      "homepage": "https://github.com/sapics/ip-location-db/tree/main/server-country",
+      "providers": [
+        "country"
+      ],
+      "redistributable": true,
+      "size": 1767128,
+      "build_date": "2026-09-16",
+      "sha256": "8db8acb9eb66fa264d28070d61536d42e95ef82e76dbff9f128c116bcbb6116a",
+      "packaged_at": "2026-09-17T20:34:04Z"
+    }
+  ]
+}

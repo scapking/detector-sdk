@@ -1,0 +1,64 @@
+# Changelog
+
+## 0.1.0
+
+Initial release.
+
+**Lookup**
+
+* One `lookup()` merges every bundled dataset into a single standardised,
+  English-only document: merged fields, `sources`, `networks`, `cross_check`,
+  `agreement`, `conflicts`, `traits`, `raw`, `meta`.
+* IPv4 and IPv6, private/reserved/loopback/multicast flags, optional reverse DNS.
+* Missing data returns `found: false` with `null` fields instead of raising.
+* `lookup_many()` (order preserved) and `stream()` (lazy, constant memory).
+
+**Distance**
+
+* `distance(source, targets)` for 1-to-1 and 1-to-N (N unbounded, generators
+  accepted), `distance_many()` for N x M, `nearest()` for ranking.
+* `haversine` (default) and `vincenty` (WGS84 ellipsoid) methods.
+* Per-row `reason` when no distance can be computed.
+
+**Async**
+
+* `AsyncDetector` mirroring the sync client, with windowed concurrency, async
+  streaming (sync and async iterables), and native asyncio downloads.
+* Module-level `alookup`, `adistance`, `arequest`, ... sharing one lazy client.
+
+**Datasets**
+
+* All 11 datasets ip-location-db publishes are bundled: `dbip-city`, `dbip-asn`,
+  `dbip-country` (CC BY 4.0), `geolite2-city` / `geolite2-asn` /
+  `geolite2-country` (MaxMind EULA - bundled, **not** redistributable; see
+  NOTICE) and `iptoasn-asn`, `iptoasn-country`, `origin-asn`, `user-country`,
+  `server-country` (PDDL).
+* Data ships as `.mmdb.xz` (35% smaller than gzip, unpacked by stdlib `lzma`);
+  gzip and plain mmdb are still accepted for downloads.
+* Split datasets share one key: `geolite2-city` is two files with `variant`
+  `ipv4` / `ipv6`, tracked per file in `sources` / `networks` / `raw` and gated
+  by address family.
+* Any MMDB v2.0 file can be loaded; unknown fields survive in `traits` / `raw`.
+* `update_datasets()` / `update_datasets_async()` with mirror fallback,
+  concurrent transfers, atomic writes and a refreshed `MANIFEST.json`.
+
+**Protocol**
+
+* `{"type","action","data","status"}` envelopes with `info` / `distance`
+  actions, batch payloads, canonical English action echo, and stable error codes.
+
+**Output**
+
+* `to_dict()`, `to_json()`, `to_flat_dict()`, dotted `get()`.
+* `locales` for name selection; `include_all_names=False` for strictly English
+  payloads; `include_raw` / `include_cross_check` to trade completeness for size.
+
+**Notable engineering decisions**
+
+* GeoLite2 is bundled on request, with the licence consequence documented in
+  NOTICE and machine-readable in `known_datasets()[key]["redistributable"]`.
+* `maxminddb` is the only dependency (`geoip2` is a model layer over the same
+  reader and pulls in `requests` + `aiohttp`).
+* Threads and multiprocessing were removed from `lookup_many`: both measured
+  slower than sequential execution (GIL on the merge, pickling of `raw` records).
+  Sharding across processes is documented instead.
