@@ -30,7 +30,8 @@ from __future__ import annotations
 
 from ._version import __version__
 from .aio import AsyncDetector
-from .api import CROSS_CHECK_FIELDS, Detector, IPLike, parse_ip
+from .api import CROSS_CHECK_FIELDS, Detector, IPLike
+from .api import parse_ip as parse_ip  # importable helper, not advertised in __all__
 from .databases import (
     BUILTIN_DATASETS,
     BUNDLED_KEYS,
