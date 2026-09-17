@@ -29,7 +29,7 @@ distance("8.8.8.8", ["1.1.1.1", "223.5.5.5"])   # -> [Distance, Distance]
 ## Install
 
 ```bash
-pip install detector-py         # distribution name; the import name is `detector`
+pip install detector-sdk        # distribution name; the import name is `detector`
 pip install .                   # from a checkout
 ```
 

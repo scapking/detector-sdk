@@ -3,9 +3,9 @@ requires = ["hatchling>=1.18"]
 build-backend = "hatchling.build"
 
 [project]
-name = "detector-py"
+name = "detector-sdk"
 version = "0.1.0"
-description = "离线 IP 情报 Python SDK：一次查询合并全部内置数据库，返回标准化 JSON，并支持 IP 间距离计算。"
+description = "Offline IP intelligence SDK: one query merges every bundled dataset into a standardised English JSON document, plus IP-to-IP distance."
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
