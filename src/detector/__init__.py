@@ -64,7 +64,6 @@ from .exceptions import (
     UnsupportedActionError,
 )
 from .functions import (
-    _auto_init,
     close,
     configure,
     distance,
@@ -157,15 +156,3 @@ __all__ = [
     "LoadingTimeoutError",
 ]
 
-
-def _bootstrap() -> None:
-    """Honour DETECTOR_INIT (import / blocking) without ever raising at import."""
-    import asyncio as _asyncio
-
-    try:
-        _asyncio.run(_auto_init())
-    except Exception:  # pragma: no cover - import must never fail because of data
-        pass
-
-
-_bootstrap()

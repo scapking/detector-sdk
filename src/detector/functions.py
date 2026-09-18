@@ -82,10 +82,6 @@ def _preparation(cache_dir: Optional[str] = None, datasets: Optional[Iterable[st
     )
 
 
-def _init_mode() -> str:
-    import os
-
-    return (os.environ.get("DETECTOR_INIT") or "lazy").strip().lower()
 
 
 def _env_defaults() -> Dict[str, Any]:
@@ -186,41 +182,46 @@ def _warmup_sync(
     }
 
 
+def _lazy_bundled() -> int:
+    """Number of lazy (``.bz``) datasets shipped; 0 when the data is archived."""
+    from .databases import package_data_dir
+
+    try:
+        return sum(1 for item in package_data_dir().glob("*.mmdb.bz"))
+    except OSError:  # pragma: no cover
+        return 0
+
+
 async def ready(timeout: Optional[float] = None, *, wait: str = "all", **options: Any) -> bool:
     """Is the database set ready to answer complete queries?
 
-    ::
-
-        await ready()               # blocks until everything is unpacked
-        await ready(2.0)            # -> False if still loading after two seconds
-        await ready(wait="any")     # -> True as soon as the first database is up
-
-    Cheap to call in a health check, and never raises: failures are reported by
-    :func:`progress` (``failed``), not by an exception.
+    ``await ready()`` blocks until everything is unpacked (lazy ``.bz`` data is
+    ready the moment the client opens, so this returns immediately); ``await
+    ready(2.0)`` is a bounded poll; ``wait="any"`` returns as soon as the first
+    database is usable. Never raises: failures surface in :func:`progress`.
     """
-    cache_dir = options.get("cache_dir")
-    datasets = options.get("datasets")
-    if not cache_dir and not datasets:
-        prep = _preparation(None, None)
-        return await asyncio.to_thread(prep.wait_for_any if wait == "any" else prep.wait, timeout)
-    prep = _preparation(cache_dir, datasets)
+    prep = _preparation(options.get("cache_dir"), options.get("datasets"))
+    if prep.total == 0 and _lazy_bundled():
+        return True
     return await asyncio.to_thread(prep.wait_for_any if wait == "any" else prep.wait, timeout)
 
 
 async def progress(**options: Any) -> Dict[str, Any]:
     """Snapshot of the preparation: readiness, per-database timings, failures.
 
-    ::
-
-        {"ready": 12, "total": 12, "loading": False, "complete": True,
-         "failed": {}, "pending": [], "timings": {"dbip-country": 0.31, ...},
-         "seconds": 10.8, "cache_dir": "/root/.cache/detector/extracted"}
+    For lazily-shipped data (``.bz`` containers) there is nothing to unpack: the
+    report reflects the ready bundled set immediately.
     """
     prep = _preparation(options.get("cache_dir"), options.get("datasets"))
+    lazy = _lazy_bundled()
+    if prep.total == 0 and lazy:
+        return {
+            "ready": lazy, "total": lazy, "loading": False, "complete": True,
+            "failed": {}, "pending": [], "timings": {}, "seconds": 0.0,
+            "cache_dir": str(prep.cache_dir),
+        }
     snapshot = dict(prep.progress())
-    snapshot["init"] = _init_mode()
     return snapshot
-
 
 def _is_single(value: Any) -> bool:
     return isinstance(value, _SCALARS) or not hasattr(value, "__iter__")
@@ -255,25 +256,6 @@ def _hashable(value: Any) -> Any:
     if isinstance(value, (str, int, float, bool)) or value is None:
         return value
     return repr(value)
-
-
-async def _auto_init() -> None:
-    """Kick off unpacking according to ``DETECTOR_INIT``.
-
-    ``lazy`` (default)  - first ``info()``/``distance()`` call pays the cost
-    ``import``          - start in a background thread as soon as the module loads
-    ``blocking``        - finish unpacking before ``import detector`` returns
-    ``off``             - never do it implicitly (only ``warmup()``/``ready()``)
-    """
-    mode = _init_mode() or "lazy"
-    if mode in ("lazy", "off", "0", "false", "no", ""):
-        return
-    prep = _preparation()
-    if mode == "blocking":
-        prep.start()
-        prep.wait(None)
-    elif mode in ("import", "background", "thread"):
-        prep.start()
 
 
 async def _client(**options: Any) -> AsyncDetector:

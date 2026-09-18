@@ -24,8 +24,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-import maxminddb
-
 from .exceptions import DatabaseError, DatabaseNotFoundError, NoDatabaseError
 from .models import ASN, City, Continent, Country, Location, Subdivision
 
@@ -337,16 +335,22 @@ BUILTIN_DATASETS: Dict[str, DatasetSpec] = {
     ),
 }
 
-#: Everything ships in the package.
-BUNDLED_KEYS: Tuple[str, ...] = tuple(BUILTIN_DATASETS)
+#: Datasets that ship in the package. Non-redistributable data (GeoLite2's EULA
+#: forbids it) is deliberately excluded; fetch it separately with a MaxMind
+#: licence key via :func:`~detector.update_datasets`.
+BUNDLED_KEYS: Tuple[str, ...] = tuple(
+    spec.key for spec in BUILTIN_DATASETS.values() if spec.redistributable
+)
 
 #: Datasets whose upstream licence does not permit redistribution of the data.
 NON_REDISTRIBUTABLE_KEYS: Tuple[str, ...] = tuple(
     spec.key for spec in BUILTIN_DATASETS.values() if not spec.redistributable
 )
 
-#: Kept for API compatibility: datasets a user may want to fetch separately.
-OPTIONAL_KEYS: Tuple[str, ...] = ()
+#: Datasets a user may fetch separately (mostly non-redistributable upstream).
+OPTIONAL_KEYS: Tuple[str, ...] = tuple(
+    spec.key for spec in BUILTIN_DATASETS.values() if spec.key not in BUNDLED_KEYS
+)
 
 
 # --------------------------------------------------------------------------- #
@@ -852,7 +856,8 @@ def discover_database_files(db_dir: Optional[os.PathLike] = None) -> List[Path]:
         item
         for item in sorted(root.iterdir())
         if item.is_file()
-        and (item.name.endswith(".mmdb") or _archive_kind(item) is not None)
+        and (item.name.endswith(".mmdb") or item.name.endswith(".mmdb.bz")
+             or _archive_kind(item) is not None)
     ]
 
 
@@ -981,12 +986,27 @@ class Database:
         self.path = Path(path)
         if not self.path.is_file():
             raise DatabaseNotFoundError(f"database file not found: {self.path}", detail=str(self.path))
-        try:
-            self._reader = maxminddb.open_database(str(self.path), _reader_mode(load_mode))
-        except Exception as exc:  # maxminddb raises a zoo of exception types
-            raise DatabaseNotFoundError(
-                f"cannot open MMDB: {exc}", detail=str(self.path)
-            ) from exc
+        if self.path.name.endswith(".bz"):
+            # Lazy block container: decompresses only the blocks a lookup touches,
+            # so bundled databases are queryable in milliseconds and never
+            # materialised on disk.
+            try:
+                from .mmdb_lazy import open_lazy
+
+                self._reader = open_lazy(self.path)
+            except Exception as exc:  # pragma: no cover - build/runtime mismatch
+                raise DatabaseNotFoundError(
+                    f"cannot open lazy MMDB: {exc}", detail=str(self.path)
+                ) from exc
+        else:
+            import maxminddb
+
+            try:
+                self._reader = maxminddb.open_database(str(self.path), _reader_mode(load_mode))
+            except Exception as exc:  # maxminddb raises a zoo of exception types
+                raise DatabaseNotFoundError(
+                    f"cannot open MMDB: {exc}", detail=str(self.path)
+                ) from exc
 
         metadata = self._reader.metadata()
         database_type = getattr(metadata, "database_type", "") or ""
@@ -1067,6 +1087,8 @@ class Database:
 
 
 def _reader_mode(load_mode: str) -> int:
+    import maxminddb
+
     mode = (load_mode or "auto").lower()
     if mode == "memory":
         return maxminddb.MODE_MEMORY

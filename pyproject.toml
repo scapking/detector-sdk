@@ -4,10 +4,10 @@ build-backend = "hatchling.build"
 
 [project]
 name = "detector-sdk"
-version = "0.3.0"
+version = "0.4.1"
 description = "Offline IP intelligence SDK: one query merges every bundled dataset into a standardised English JSON document, plus IP-to-IP distance."
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [{ name = "detector contributors" }]
 keywords = ["ip", "geoip", "mmdb", "geolocation", "distance", "offline", "sdk"]
@@ -48,11 +48,11 @@ addopts = "-q"
 
 [tool.ruff]
 line-length = 110
-target-version = "py39"
+target-version = "py310"
 
 [tool.ruff.lint]
-# UP* is disabled on purpose: the code targets Python 3.9, so Optional[...] /
-# Dict[...] stay instead of PEP 604 / PEP 585 syntax.
+# UP* is disabled on purpose: the code targets Python 3.10+ and keeps Optional[...]
+# / Dict[...] for consistency with the vendored reader it embeds.
 select = ["E", "F", "I", "B", "RUF"]
 ignore = [
   "UP",
@@ -61,4 +61,5 @@ ignore = [
   "PYI034",   # __enter__/__exit__ typing style
   "PYI036",
   "RUF022",   # __all__ is grouped by purpose, not alphabetically
+  "B905",     # zip() without strict= (vendor/annotations use it liberally)
 ]

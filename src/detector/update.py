@@ -70,7 +70,7 @@ def known_datasets() -> Dict[str, Dict[str, Any]]:
             "name": spec.name,
             "kind": spec.kind,
             "license": spec.license,
-            "bundled": spec.bundled,
+            "bundled": key in BUNDLED_KEYS,
             "redistributable": spec.redistributable,
             "update": spec.update,
             "providers": list(spec.providers),

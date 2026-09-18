@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import json
-import lzma
-import shutil
 from pathlib import Path
 
 import pytest
@@ -15,7 +13,6 @@ from detector.databases import (
     BUNDLED_KEYS,
     NON_REDISTRIBUTABLE_KEYS,
     OPTIONAL_KEYS,
-    _part_siblings,
     detect_kind,
     ensure_extracted,
     extraction_dir,
@@ -23,23 +20,27 @@ from detector.databases import (
     member_for_filename,
     normalize_record,
     package_data_dir,
-    part_info,
     spec_for_filename,
     user_cache_dir,
 )
 
+from ._data import blocks_of, write_archive, write_raw
+
 
 def test_registry_covers_the_upstream_project() -> None:
-    expected = {
+    assert set(BUILTIN_DATASETS) >= {
         "dbip-city", "dbip-asn", "dbip-country",
         "iptoasn-asn", "iptoasn-country", "origin-asn",
         "user-country", "server-country",
         "geolite2-city", "geolite2-asn", "geolite2-country",
     }
-    assert expected == set(BUILTIN_DATASETS)
-    # Everything the upstream project publishes ships in the package.
-    assert set(BUNDLED_KEYS) == expected
-    assert OPTIONAL_KEYS == ()
+    # The redistributable set ships in the package, lazily as .bz containers.
+    assert set(BUNDLED_KEYS) == {
+        "dbip-city", "dbip-asn", "dbip-country",
+        "iptoasn-asn", "iptoasn-country", "origin-asn",
+        "user-country", "server-country",
+    }
+    assert set(OPTIONAL_KEYS) == {"geolite2-city", "geolite2-asn", "geolite2-country"}
     assert set(NON_REDISTRIBUTABLE_KEYS) == {"geolite2-city", "geolite2-asn", "geolite2-country"}
     for spec in BUILTIN_DATASETS.values():
         assert spec.license
@@ -55,9 +56,9 @@ def test_registry_covers_the_upstream_project() -> None:
 def test_known_datasets_shape() -> None:
     registry = known_datasets()
     assert registry["dbip-city"]["bundled"] is True
-    assert registry["geolite2-city"]["bundled"] is True          # bundled, but...
-    assert registry["geolite2-city"]["redistributable"] is False  # ...licence-restricted
-    assert registry["dbip-city"]["files"] == ["dbip-city-lite.mmdb.xz"]
+    assert registry["geolite2-city"]["bundled"] is False         # registered, fetch separately
+    assert registry["geolite2-city"]["redistributable"] is False  # licence-restricted
+    assert registry["dbip-city"]["files"] == ["dbip-city-lite.mmdb.xz"]  # upstream member name
     assert len(registry["geolite2-city"]["files"]) == 2
     assert "PDDL" in registry["user-country"]["license"]
     assert "CC BY 4.0" in registry["dbip-asn"]["license"]
@@ -68,28 +69,29 @@ def test_bundled_files_exist_and_match_registry() -> None:
     for key in BUNDLED_KEYS:
         spec = BUILTIN_DATASETS[key]
         for member in spec.members:
-            path = data_dir / member.filename
-            parts = _part_siblings(data_dir, member)
-            assert path.is_file() or parts, f"missing bundled dataset: {member.filename}"
-            surfaces = [path] if path.is_file() else parts
-            assert sum(item.stat().st_size for item in surfaces) > 1024
-            for surface in surfaces:
-                matched_spec, matched_member = member_for_filename(surface.name)
-                assert matched_spec is not None and matched_spec.key == key
-                assert matched_member is not None and matched_member.filename == member.filename
-                assert spec_for_filename(surface.name).key == key
+            stem = member.filename.split(".mmdb")[0]
+            path = data_dir / f"{stem}.mmdb.bz"
+            assert path.is_file(), f"missing bundled .bz: {path}"
+            assert path.stat().st_size > 1024
+            matched_spec, matched_member = member_for_filename(path.name)
+            assert matched_spec is not None and matched_spec.key == key
+            assert spec_for_filename(path.name).key == key
+            assert matched_member is not None  # the lazy container resolves to the member
 
 
-def test_bundled_data_is_split_for_parallel_first_run() -> None:
-    """The big databases ship as parts, so first-run decompression parallelises."""
-    data_dir = package_data_dir()
-    spec = BUILTIN_DATASETS["dbip-city"]
-    parts = _part_siblings(data_dir, spec.members[0])
-    assert len(parts) >= 2, "the largest database should be split into parts"
-    assert all(part_info(item.name) is not None for item in parts)
-    assert [part_info(item.name)[1] for item in parts] == sorted(
-        part_info(item.name)[1] for item in parts
-    )
+def test_bundled_data_uses_lazy_blocks() -> None:
+    """The databases ship as block containers: no extraction, instant first query."""
+    block_size, block_count = blocks_of("dbip-city-lite")
+    assert block_size > 0 and block_count >= 2, "the biggest database has many blocks"
+    from detector.mmdb_lazy import open_lazy
+
+    bz = Path(__file__).resolve().parents[1] / "src" / "detector" / "data"
+    lazy = open_lazy(bz / "dbip-city-lite.mmdb.bz")
+    try:
+        record, _prefix = lazy.get_with_prefix_len("8.8.8.8")
+        assert isinstance(record, dict) and record.get("country", {}).get("iso_code") == "US"
+    finally:
+        lazy.close()
 
 
 def test_build_dates_come_from_the_database_metadata() -> None:
@@ -176,11 +178,7 @@ def test_normalize_keeps_unknown_fields() -> None:
 
 def test_custom_mmdb_file_is_loaded(tmp_path: Path) -> None:
     """Any MMDB v2.0 file can be plugged in: build one by copying a bundled DB."""
-    source = package_data_dir() / BUILTIN_DATASETS["dbip-asn"].filename
-    with lzma.open(source, "rb") as handle:
-        data = handle.read()
-    custom = tmp_path / "my-own-asn.mmdb"
-    custom.write_bytes(data)
+    custom = write_raw("dbip-asn-lite", tmp_path)
 
     detector = Detector(
         databases={"my-own-asn": custom},
@@ -199,8 +197,7 @@ def test_custom_mmdb_file_is_loaded(tmp_path: Path) -> None:
 
 def test_database_directory_discovery(tmp_path: Path) -> None:
     """Files dropped into a directory are picked up, and the registry names them."""
-    source = package_data_dir() / BUILTIN_DATASETS["dbip-asn"].filename
-    shutil.copy(source, tmp_path / source.name)
+    write_raw("dbip-asn-lite", tmp_path)
     detector = Detector(db_dir=tmp_path, cache_size=0)
     try:
         assert detector.dataset_keys == ["dbip-asn"]
@@ -210,8 +207,8 @@ def test_database_directory_discovery(tmp_path: Path) -> None:
 
 
 def test_ensure_extracted_is_idempotent(tmp_path: Path) -> None:
-    source = package_data_dir() / BUILTIN_DATASETS["dbip-asn"].filename
-    assert source.name.endswith(".mmdb.xz")       # shipped format
+    source = write_archive("dbip-asn-lite", tmp_path, codec="xz")  # synthetic archive
+    assert source.name.endswith(".mmdb.xz")
     first = ensure_extracted(source, tmp_path)
     assert first.is_file() and first.name.endswith(".mmdb")
     assert first.parent == extraction_dir(tmp_path)
@@ -221,38 +218,27 @@ def test_ensure_extracted_is_idempotent(tmp_path: Path) -> None:
     assert second.stat().st_mtime_ns == stamp
 
 
-def test_multi_file_dataset_shares_one_key(detector: Detector) -> None:
-    """GeoLite2-City is two files but one dataset key."""
-    uids = detector.database_uids
-    assert "geolite2-city-ipv4" in uids and "geolite2-city-ipv6" in uids
-    assert detector.dataset_keys.count("geolite2-city") == 1
-    assert "geolite2-city" in detector.dataset_keys
+def test_bundled_dataset_resolves_as_one_key(detector: Detector) -> None:
+    """dbip-city loads lazily under a single dataset key."""
+    assert "dbip-city" in detector.dataset_keys
+    assert detector.dataset_keys.count("dbip-city") == 1
+    assert "dbip-city" in detector.database_uids
 
 
 def test_manifest_round_trip(tmp_path: Path) -> None:
-    """Works whether a member ships whole or split into parts."""
-    data_dir = package_data_dir()
-    for key in ("dbip-asn", "geolite2-city"):
-        for member in BUILTIN_DATASETS[key].members:
-            surfaces = _part_siblings(data_dir, member)
-            if not surfaces:
-                surfaces = [data_dir / member.filename]
-            for surface in surfaces:
-                shutil.copy(surface, tmp_path / surface.name)
-    path = write_manifest(tmp_path, ["dbip-asn", "geolite2-city"])
+    """Manifest building works for archive files dropped into a directory."""
+    write_archive("dbip-asn-lite", tmp_path, codec="xz")
+    write_archive("dbip-country-lite", tmp_path, codec="xz")
+    path = write_manifest(tmp_path, ["dbip-asn", "dbip-country"])
     payload = json.loads(path.read_text())
     keys = {(entry["key"], entry["variant"]) for entry in payload["datasets"]}
-    assert keys == {("dbip-asn", ""), ("geolite2-city", "ipv4"), ("geolite2-city", "ipv6")}
+    assert keys == {("dbip-asn", ""), ("dbip-country", "")}
     assert all(entry["sha256"] for entry in payload["datasets"])
     assert payload["attribution"]
-    split = [entry for entry in payload["datasets"] if entry.get("parts")]
-    assert split, "a split member must record its parts"
-    assert all(len(entry["part_sizes"]) == len(entry["parts"]) for entry in split)
-    assert all(entry["sha256"] for entry in split)
     # Build dates come from MMDB metadata, not the file mtime.
     assert all(entry["build_date"].startswith("202") for entry in payload["datasets"])
     assert read_manifest(tmp_path)["datasets"][0]["key"] == "dbip-asn"
-    assert set(load_manifest(tmp_path)) == {"dbip-asn", "geolite2-city:ipv4", "geolite2-city:ipv6"}
+    assert set(load_manifest(tmp_path)) == {"dbip-asn", "dbip-country"}
 
 
 def test_missing_database_raises_a_clear_error(tmp_path: Path) -> None:

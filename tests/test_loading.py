@@ -8,7 +8,6 @@ shared per (data dir, cache dir), so distinct paths keep the tests independent.
 from __future__ import annotations
 
 import asyncio
-import shutil
 
 import pytest
 
@@ -21,17 +20,17 @@ from detector import (
     ready,
     warmup,
 )
-from detector.databases import package_data_dir
 
-SMALL = ("iptoasn-country.mmdb.xz", "server-country.mmdb.xz", "dbip-asn-lite.mmdb.xz")
+from ._data import write_archive
 
 
 @pytest.fixture
 def small_data(tmp_path, monkeypatch):
+    """A tiny *archive*-based data directory, so the preparation machinery runs."""
     data = tmp_path / "data"
-    data.mkdir()
-    for name in SMALL:
-        shutil.copy(package_data_dir() / name, data / name)
+    write_archive("iptoasn-country", data, codec="xz")
+    write_archive("server-country", data, codec="xz")
+    write_archive("dbip-asn-lite", data, codec="xz")
     monkeypatch.setenv("DETECTOR_CACHE_DIR", str(tmp_path / "cache"))
     monkeypatch.setenv("DETECTOR_DB_DIR", str(data))
     return data
@@ -72,20 +71,20 @@ def test_wait_for_any_is_immediate_but_complete_is_not(small_data) -> None:
 
 
 def test_broken_dataset_is_reported_not_fatal(small_data) -> None:
-    (small_data / "dbip-country-lite.mmdb.xz").write_bytes(b"not an archive at all")
+    (small_data / "iptoasn-country.mmdb.xz").write_bytes(b"not an archive at all")
     detector = Detector()
     try:
         row = detector.lookup("8.8.8.8")
         assert row.found, "the healthy datasets must still answer"
         failed = row.to_dict()["meta"]["datasets_failed"]
-        assert "dbip-country" in failed
-        assert "dbip-country" in asyncio.run(progress())["failed"]
+        assert "iptoasn-country" in failed
+        assert "iptoasn-country" in asyncio.run(progress())["failed"]
     finally:
         detector.close()
 
 
 def test_strict_mode_refuses_a_broken_dataset(small_data) -> None:
-    (small_data / "dbip-country-lite.mmdb.xz").write_bytes(b"broken")
+    (small_data / "iptoasn-country.mmdb.xz").write_bytes(b"broken")
     from detector import DatabaseError
 
     with pytest.raises((DatabaseError, NoDatabaseError)):
@@ -110,18 +109,6 @@ def test_warmup_and_client_share_one_preparation(small_data) -> None:
     second = asyncio.run(warmup())
     assert second["already_ready"] is True
     assert second["seconds"] == 0.0
-
-
-def test_import_time_init_does_not_block(monkeypatch, small_data) -> None:
-    monkeypatch.setenv("DETECTOR_INIT", "import")
-    from detector.functions import _auto_init
-
-    started = asyncio.run(_auto_init())          # returns immediately
-    assert started is None
-    assert asyncio.run(ready(5.0)) is True       # background thread finishes it
-    snapshot = asyncio.run(progress())
-    assert snapshot["init"] == "import"
-    assert snapshot["ready"] == snapshot["total"]
 
 
 def test_env_defaults_shape_the_client(monkeypatch, small_data) -> None:

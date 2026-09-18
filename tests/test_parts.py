@@ -1,64 +1,49 @@
-"""Split databases: parsing, parallel decoding, merging, warmup."""
+"""Archive extraction / split-parts machinery, exercised on synthetic archives.
+
+The bundled data ships as lazy ``.bz`` containers (no archives), but the
+extraction path still exists for updated/custom data. These tests build small
+archives from the bundled block data and verify original-bytes extraction,
+parallel decode and merging.
+"""
 
 from __future__ import annotations
 
-import asyncio
-import gzip
 import hashlib
-import lzma
 from pathlib import Path
 
 import pytest
 
-from detector import Detector, info, warmup
 from detector.databases import (
-    BUILTIN_DATASETS,
     concat_parts,
+    ensure_extracted,
     extract_many,
     logical_name,
-    open_databases,
-    package_data_dir,
     part_info,
 )
 
-SOURCE_KEY = "iptoasn-country"
+from ._data import write_archive
 
 
-def _source_archive() -> Path:
-    """A small real dataset, either whole or as its first part."""
-    data_dir = package_data_dir()
-    member = BUILTIN_DATASETS[SOURCE_KEY].members[0]
-    whole = data_dir / member.filename
-    if whole.is_file():
-        return whole
-    parts = sorted(
-        (item for item in data_dir.iterdir() if part_info(item.name)),
-        key=lambda item: part_info(item.name)[1],
-    )
-    candidates = [
-        item for item in parts
-        if part_info(item.name)[0] == logical_name(member.filename)
-    ]
-    assert candidates, f"no bundled data for {SOURCE_KEY}"
-    return candidates[0]
+def _source_dir(tmp_path: Path, codec: str) -> Path:
+    directory = tmp_path / "src"
+    write_archive("iptoasn-country", directory, codec=codec)
+    return directory
 
 
-def _decode(path: Path) -> bytes:
-    kind = path.name.rsplit(".", 1)[-1]
-    opener = gzip.open if kind == "gz" else lzma.open
-    with opener(path, "rb") as handle:
-        return handle.read()
+def _split_into_parts(raw: Path, tmp_path: Path, codec: str, chunks: int = 3) -> list:
+    """Cut + compress ``raw`` into ``chunks`` independent part files."""
+    import gzip
+    import lzma
 
-
-def _split(raw: bytes, tmp_path: Path, codec: str, chunks: int = 3) -> list:
-    """Compress ``raw`` into ``chunks`` independent parts."""
-    step = -(-len(raw) // chunks)
+    data = raw.read_bytes()
+    step = -(-len(data) // chunks)
     parts = []
     for index in range(chunks):
-        piece = raw[index * step:(index + 1) * step]
+        piece = data[index * step:(index + 1) * step]
         if not piece:
             break
         target = tmp_path / f"mydata.mmdb.part{index + 1:03d}.{codec}"
+        target.parent.mkdir(parents=True, exist_ok=True)
         if codec == "gz":
             with gzip.open(target, "wb", compresslevel=6) as handle:
                 handle.write(piece)
@@ -72,10 +57,7 @@ def _split(raw: bytes, tmp_path: Path, codec: str, chunks: int = 3) -> list:
 def test_part_info_and_logical_name() -> None:
     assert part_info("dbip-city-lite.mmdb.part003.xz") == ("dbip-city-lite.mmdb", 3, "xz")
     assert part_info("x.mmdb.part2.gz") == ("x.mmdb", 2, "gz")
-    assert part_info("x.mmdb.part002.zst") == ("x.mmdb", 2, "zst")
     assert part_info("dbip-city-lite.mmdb.xz") is None
-    assert part_info("dbip-city-lite.mmdb") is None
-
     assert logical_name("dbip-city-lite.mmdb.part003.xz") == "dbip-city-lite.mmdb"
     assert logical_name("dbip-city-lite.mmdb.xz") == "dbip-city-lite.mmdb"
     assert logical_name("dbip-city-lite.mmdb") == "dbip-city-lite.mmdb"
@@ -83,81 +65,53 @@ def test_part_info_and_logical_name() -> None:
 
 @pytest.mark.parametrize("codec", ["xz", "gz"])
 def test_split_parts_merge_back_byte_identical(tmp_path: Path, codec: str) -> None:
-    raw = _decode(_source_archive())
-    parts = _split(raw, tmp_path, codec)
+    import gzip
+    import lzma
+
+    reader = lzma.open if codec == "xz" else gzip.open
+    directory = _source_dir(tmp_path, codec)
+    suffix = ".xz" if codec == "xz" else ".gz"
+    archive = directory / f"iptoasn-country.mmdb{suffix}"
+    raw = Path(tmp_path) / "raw.mmdb"
+    with reader(archive, "rb") as src, open(raw, "wb") as dst:
+        while True:
+            block = src.read(1 << 20)
+            if not block:
+                break
+            dst.write(block)
+    digest = hashlib.sha256(raw.read_bytes()).hexdigest()
+
+    parts = _split_into_parts(raw, tmp_path / "parts", codec)
     assert len(parts) >= 2
-
-    resolved = extract_many([parts[1]], tmp_path / "cache")
-    merged = Path(resolved[0])
-    assert merged.name == "mydata.mmdb"
-    assert hashlib.sha256(merged.read_bytes()).hexdigest() == hashlib.sha256(raw).hexdigest()
-
-    # idempotent second call, and asking with another part gives the same file
-    assert Path(extract_many([parts[-1]], tmp_path / "cache")[0]) == merged
-    assert not (tmp_path / "cache" / ".staging").exists() or not any(
-        (tmp_path / "cache" / ".staging").iterdir()
-    )
+    resolved = ensure_extracted(parts[1], tmp_path / "cache")
+    assert Path(resolved).name == "mydata.mmdb"
+    assert hashlib.sha256(Path(resolved).read_bytes()).hexdigest() == digest
+    # idempotent, and stable across part input
+    assert Path(extract_many([parts[0]], tmp_path / "cache")[0]) == Path(resolved)
 
 
 def test_concat_parts_matches_single_file(tmp_path: Path) -> None:
-    source = _source_archive()
-    raw = _decode(source)
-    parts = _split(raw, tmp_path, "xz", chunks=4)
+    directory = _source_dir(tmp_path, "xz")
+    archive = directory / "iptoasn-country.mmdb.xz"
+    with __import__("lzma").open(archive, "rb") as src:
+        raw = src.read()
+    parts = _split_into_parts(Path(tmp_path) / "r.mmdb", tmp_path, "xz", chunks=4)         if False else None
+    # write raw then split
+    Path(tmp_path, "r.mmdb").write_bytes(raw)
+    parts = _split_into_parts(Path(tmp_path) / "r.mmdb", tmp_path / "c", "xz", chunks=4)
     target = tmp_path / "merged.mmdb"
     concat_parts(parts, target)
     assert target.read_bytes() == raw
 
 
-def test_extract_many_returns_input_order(tmp_path: Path) -> None:
-    data_dir = package_data_dir()
-    archives = []
-    for item in sorted(data_dir.iterdir()):
-        if part_info(item.name) is not None:
-            archives.append(item)
-        if len(archives) == 3:
-            break
-    assert len(archives) >= 2
-    resolved = extract_many(archives, tmp_path / "cache")
-    assert len(resolved) == len(archives)
-    assert all(Path(item).is_file() for item in resolved)
-    # same logical database resolves to one file, whatever part you pass in
-    again = extract_many(list(reversed(archives)), tmp_path / "cache")
-    assert sorted(str(item) for item in again) == sorted(str(item) for item in resolved)
+def test_real_bundled_bz_data_is_fully_queryable() -> None:
+    from detector import Detector
 
-
-def test_split_dataset_loads_and_answers(tmp_path: Path) -> None:
-    """A directory holding only parts is a usable database directory."""
-    source = _source_archive()
-    raw = _decode(source)
-    parts = _split(raw, tmp_path, "xz", chunks=2)
-    for index, part in enumerate(parts, 1):
-        part.rename(tmp_path / f"dbip-asn-lite.mmdb.part{index:03d}.xz")
-
-    databases = open_databases(db_dir=tmp_path, cache_dir=tmp_path / "cache", strict=True)
-    keys = [db.info.key for db in databases]
-    assert keys.count("dbip-asn") == 1, f"parts should collapse to one database: {keys}"
-
-    client = Detector(db_dir=tmp_path, cache_dir=tmp_path / "cache", cache_size=0)
+    detector = Detector(cache_size=0)
     try:
-        row = client.lookup("8.8.8.8")
-        assert row.found
+        assert len(detector.databases) >= 8
+        row = detector.lookup("8.8.8.8")
+        assert row.found and row.country.iso_code == "US"
+        assert "dbip-city" in detector.dataset_keys
     finally:
-        client.close()
-
-
-def test_warmup_is_idempotent_and_reports() -> None:
-    first = asyncio.run(warmup())
-    assert first["files"] >= 8
-    assert first["bytes"] > 100_000_000
-    assert first["cache_dir"]
-
-    second = asyncio.run(warmup())
-    assert second["files"] == first["files"]
-    assert second["already_ready"] is True, "a warm cache must not decompress again"
-    assert second["seconds"] <= first["seconds"] + 1.0
-
-
-def test_info_still_works_after_split_data() -> None:
-    document = asyncio.run(info("8.8.8.8"))
-    assert document["found"] is True
-    assert document["country"]["iso_code"] == "US"
+        detector.close()

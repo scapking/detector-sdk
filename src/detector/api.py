@@ -208,7 +208,7 @@ class Detector:
                     strict=strict,
                 )
             )
-        elif extract:
+        elif extract and self._has_archives([Path(self.db_dir), *dirs]):
             self._prep = shared_preparation(
                 db_dir=db_dir,
                 cache_dir=self.cache_dir,
@@ -222,6 +222,22 @@ class Detector:
             self._open_ready(prepare_all=(self._wait != "none"))
             if wait_timeout is not None or self._wait in ("all", "any"):
                 self._apply_wait_policy(wait_timeout)
+        elif extract:
+            # No archives to unpack (pure lazy .bz or plain .mmdb): open directly,
+            # which is instant because a .bz reader decompresses on demand.
+            self._databases = list(
+                open_databases(
+                    db_dir=db_dir,
+                    databases=None,
+                    cache_dir=self.cache_dir,
+                    load_mode=load_mode,
+                    extract=False,
+                    strict=strict,
+                    include=datasets,
+                    exclude=exclude,
+                    extra_dirs=dirs,
+                )
+            )
         else:
             self._databases = list(
                 open_databases(
@@ -357,6 +373,19 @@ class Detector:
         prep.fail_if_empty()
         if not self._databases:
             raise NoDatabaseError("every database failed to load")
+
+    def _has_archives(self, dirs: List[Path]) -> bool:
+        """Any archive (``.xz``/``.gz``/``.zst``/parts) left to unpack anywhere?"""
+        from .databases import _archive_kind, discover_database_files
+
+        for root in dirs:
+            try:
+                for path in discover_database_files(root):
+                    if _archive_kind(path) is not None:
+                        return True
+            except OSError:
+                continue
+        return False
 
     def _raise_if_strict(self, prep: Preparation) -> None:
         """``strict=True`` means "a broken dataset is an error", not a warning."""

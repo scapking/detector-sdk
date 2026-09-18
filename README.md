@@ -16,7 +16,7 @@ await distance("8.8.8.8", "1.1.1.1")     # -> dict
 await distance("8.8.8.8", ["1.1.1.1", "223.5.5.5"])   # -> [dict, dict]
 ```
 
-* **11 datasets bundled** (every dataset ip-location-db publishes), ~90 MB packaged,
+* **8 redistributable datasets bundled** (sapics PDDL + DB-IP), ~80 MB, as lazy block containers,
   read through memory-mapped MMDB files
 * **Multi-source merge** with `cross_check` / `agreement` / `conflicts` so you can
   see which source said what before trusting a value
@@ -37,9 +37,10 @@ pip install .                   # from a checkout
 ```
 
 The databases ship inside the wheel, split into independently compressed parts.
-First use decompresses and merges them into `~/.cache/detector/extracted`
-(override with `DETECTOR_CACHE_DIR`) — 251 MB of plain MMDB files, one write pass,
-parts decoded in parallel. Pay that cost up front with `await warmup()`:
+Bundled databases ship as lazy **block containers** (`.bz`): a lookup
+decompresses only the blocks it touches, so nothing is materialised - cold start
+(import + open + first query) is ~0.39 s even on a 2-core / 25 MB/s box, and
+`await ready()` returns immediately.
 MMDB across 12 files. Reading is memory-mapped, so RAM stays low (~30 MB with
 everything loaded).
 

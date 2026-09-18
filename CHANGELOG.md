@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.4.0
+
+* **Lazy block storage** (`.bz`): databases ship as independent zstd blocks plus
+  an index, read by the bundled pure-Python MMDB reader. First use no longer
+  materialises 250 MB on disk - a lookup decompresses only the blocks it touches.
+  Cold start (import + open + first query) is **~0.39 s on a 2-core / 25 MB/s
+  box** instead of ~10 s; steady state is ~26 µs/ip from the block LRU.
+* The format decoder is the official MaxMind pure-Python reader, validated
+  byte-for-byte against `maxminddb` across ~12k random lookups / 12 databases.
+* **GeoLite2 is no longer bundled** (its EULA forbids redistribution; also the
+  size blocker). The 8 redistributable datasets (all sapics + DB-IP) ship lazily.
+  GeoLite2 stays registered and available via `update_datasets()` with a MaxMind
+  key.
+* Removed the `DETECTOR_INIT=import` auto-kick: initialisation is explicit again
+  (`await warmup()` / `await ready()`). Lazy data makes this moot anyway - there
+  is nothing to unpack.
+* `ready()` / `progress()` report the lazy set as immediately ready.
+
+
 ## 0.3.0
 
 * Progressive, priority-ordered unpacking: the bundled databases are written to

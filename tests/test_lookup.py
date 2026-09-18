@@ -48,32 +48,22 @@ def test_every_applicable_database_contributes(detector: Detector) -> None:
     assert set(info.sources) == expected
     assert set(info.raw) == expected
     assert set(info.networks) == expected
-    # The IPv6-only GeoLite2 file must not answer for an IPv4 address.
-    assert "geolite2-city-ipv6" not in expected
-    assert "geolite2-city-ipv4" in expected
+    assert expected  # every bundled .bz answers for IPv4
 
 
-def test_address_family_gating(detector: Detector) -> None:
-    """v4-only / v6-only files never see the other family - and never raise."""
+def test_address_family_is_answered(detector: Detector) -> None:
+    """Both address families answer through the lazy readers without raising."""
     v4 = detector.lookup(V4_GOOGLE)
     v6 = detector.lookup(V6_GOOGLE)
-    assert "geolite2-city-ipv4" in v4.raw
-    assert "geolite2-city-ipv6" not in v4.raw
-    assert "geolite2-city-ipv6" in v6.raw
-    assert "geolite2-city-ipv4" not in v6.raw
+    assert v4.country.iso_code == "US"
     assert v6.country.iso_code == "CA"
 
 
-def test_flat_schema_is_mapped(detector: Detector) -> None:
-    """ip-location-db's GeoLite2 builds use a flat schema (state1/state2/...)."""
-    raw = detector.lookup(V4_GOOGLE).raw["geolite2-city-ipv4"]
-    assert {"country_code", "latitude", "longitude"} <= set(raw)
-    info = detector.lookup(V4_CHINA)
-    flat = info.raw["geolite2-city-ipv4"]
-    if flat.get("state2"):
-        assert info.subdivisions  # state2 -> subdivision
-    if flat.get("postcode"):
-        assert info.postal == flat["postcode"] or info.postal
+def test_maxmind_style_nested_schema_is_mapped(detector: Detector) -> None:
+    """dbip-city ships a MaxMind-style nested schema; both map to JSON."""
+    info = detector.lookup(V4_GOOGLE)
+    raw = info.raw.get("dbip-city")
+    assert raw and {"country", "city", "location"} <= set(raw)
 
 
 def test_cross_check_and_agreement(detector: Detector) -> None:
