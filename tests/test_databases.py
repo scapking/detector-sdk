@@ -15,6 +15,7 @@ from detector.databases import (
     BUNDLED_KEYS,
     NON_REDISTRIBUTABLE_KEYS,
     OPTIONAL_KEYS,
+    _part_siblings,
     detect_kind,
     ensure_extracted,
     extraction_dir,
@@ -22,6 +23,7 @@ from detector.databases import (
     member_for_filename,
     normalize_record,
     package_data_dir,
+    part_info,
     spec_for_filename,
     user_cache_dir,
 )
@@ -67,12 +69,27 @@ def test_bundled_files_exist_and_match_registry() -> None:
         spec = BUILTIN_DATASETS[key]
         for member in spec.members:
             path = data_dir / member.filename
-            assert path.is_file(), f"missing bundled dataset: {path}"
-            assert path.stat().st_size > 1024
-            matched_spec, matched_member = member_for_filename(path.name)
-            assert matched_spec is not None and matched_spec.key == key
-            assert matched_member is not None and matched_member.filename == member.filename
-            assert spec_for_filename(path.name).key == key
+            parts = _part_siblings(data_dir, member)
+            assert path.is_file() or parts, f"missing bundled dataset: {member.filename}"
+            surfaces = [path] if path.is_file() else parts
+            assert sum(item.stat().st_size for item in surfaces) > 1024
+            for surface in surfaces:
+                matched_spec, matched_member = member_for_filename(surface.name)
+                assert matched_spec is not None and matched_spec.key == key
+                assert matched_member is not None and matched_member.filename == member.filename
+                assert spec_for_filename(surface.name).key == key
+
+
+def test_bundled_data_is_split_for_parallel_first_run() -> None:
+    """The big databases ship as parts, so first-run decompression parallelises."""
+    data_dir = package_data_dir()
+    spec = BUILTIN_DATASETS["dbip-city"]
+    parts = _part_siblings(data_dir, spec.members[0])
+    assert len(parts) >= 2, "the largest database should be split into parts"
+    assert all(part_info(item.name) is not None for item in parts)
+    assert [part_info(item.name)[1] for item in parts] == sorted(
+        part_info(item.name)[1] for item in parts
+    )
 
 
 def test_build_dates_come_from_the_database_metadata() -> None:
@@ -213,16 +230,25 @@ def test_multi_file_dataset_shares_one_key(detector: Detector) -> None:
 
 
 def test_manifest_round_trip(tmp_path: Path) -> None:
+    """Works whether a member ships whole or split into parts."""
+    data_dir = package_data_dir()
     for key in ("dbip-asn", "geolite2-city"):
         for member in BUILTIN_DATASETS[key].members:
-            source = package_data_dir() / member.filename
-            shutil.copy(source, tmp_path / source.name)
+            surfaces = _part_siblings(data_dir, member)
+            if not surfaces:
+                surfaces = [data_dir / member.filename]
+            for surface in surfaces:
+                shutil.copy(surface, tmp_path / surface.name)
     path = write_manifest(tmp_path, ["dbip-asn", "geolite2-city"])
     payload = json.loads(path.read_text())
     keys = {(entry["key"], entry["variant"]) for entry in payload["datasets"]}
     assert keys == {("dbip-asn", ""), ("geolite2-city", "ipv4"), ("geolite2-city", "ipv6")}
     assert all(entry["sha256"] for entry in payload["datasets"])
     assert payload["attribution"]
+    split = [entry for entry in payload["datasets"] if entry.get("parts")]
+    assert split, "a split member must record its parts"
+    assert all(len(entry["part_sizes"]) == len(entry["parts"]) for entry in split)
+    assert all(entry["sha256"] for entry in split)
     # Build dates come from MMDB metadata, not the file mtime.
     assert all(entry["build_date"].startswith("202") for entry in payload["datasets"])
     assert read_manifest(tmp_path)["datasets"][0]["key"] == "dbip-asn"

@@ -1,6 +1,6 @@
 {
-  "generator": "detector/0.1.0",
-  "generated_at": "2026-09-17T20:34:04Z",
+  "generator": "detector/0.2.2",
+  "generated_at": "2026-09-17T23:50:51Z",
   "attribution": "Country/ASN data from the ip-location-db project (https://github.com/sapics/ip-location-db), PDDL licensed | IP Geolocation by DB-IP (https://db-ip.com) | This product includes GeoLite2 data created by MaxMind, available from https://www.maxmind.com",
   "bundled": [
     "dbip-city",
@@ -21,25 +21,42 @@
     "geolite2-country"
   ],
   "sha256": {
-    "dbip-city-lite.mmdb.xz": "1e40ebf147ab622e5808d150b0ba53d046f88ac4070d1f2c6a911b4087165a08",
-    "dbip-asn-lite.mmdb.xz": "4549eb83428979d9bd0141cb56f93446c8c3ce35faf852eb6deb27f19f2cfc12",
-    "dbip-country-lite.mmdb.xz": "9072012177b4c9dc3655732f1fc7fa6a66cffa63b8e1aa5ae229c7ad48ba9a9a",
-    "geolite2-city-ipv4.mmdb.xz": "c9fcf0df252bbcbb923bfd6384d7a0bc9d56e75edb86daff6794d594f68902fb",
-    "geolite2-city-ipv6.mmdb.xz": "9b1968a1dd3fbab2d5a1a5cde59c0a0ef7571598904ed137bf5a8868247bd104",
-    "geolite2-asn.mmdb.xz": "dccbfaff8964344394f995474262ef511de2bc93b6407dee68875586547ebe96",
-    "geolite2-country.mmdb.xz": "5996b63fcf92133bec0f275dbdacd532ede4224a8c45acd98d0570125bafe8e0",
-    "iptoasn-asn.mmdb.xz": "2334af1ca890f4185280625144ded1e36a91ac621ea1155cdb8f25ce3726435c",
-    "iptoasn-country.mmdb.xz": "1564e4ec760fcf0abc907e8cc563415527b89015b1f905ffcd0d6e844d1fc735",
-    "origin-asn.mmdb.xz": "23bb902a7d121459850d1d3faa30a729709a68139862024762b65553ac12f536",
-    "user-country.mmdb.xz": "c3a63771a3ad7c0572b5355c9ddc72cd84f5e19f4aca1b738571fdc3c9960294",
-    "server-country.mmdb.xz": "8db8acb9eb66fa264d28070d61536d42e95ef82e76dbff9f128c116bcbb6116a"
+    "dbip-city-lite": "05a10861259c7966cb54d7181ef8c360de8c8829d182098c0e62a9b7d54cd50d",
+    "dbip-asn-lite": "ab07c764a10c4f8c2f3539377fa86e5c928243084aafd359d1be4cb8543d7406",
+    "dbip-country-lite": "d284ae2e7427fe33d83465e1506b2b21aae47eb8a9b099f8f4dac6a98c99f041",
+    "geolite2-city-ipv4": "6494ceedc53e75b7dbf60b5d7932c10a375ac6a598bd10c71ea93bcbec38d7ba",
+    "geolite2-city-ipv6": "3ac0ef57e9ec071f9d70003ebb38cfe0475b6017da960fb666754e0ef0ca00cc",
+    "geolite2-asn": "b25192d6b0168db663d314fd3dfce9aed4057cd9bd2aa2ee50f585af83eedc1d",
+    "geolite2-country": "b620ae586ddb935df11bb3d037563c9bafd4ff8e14e9d6c3c6505b8063990797",
+    "iptoasn-asn": "22cf1d44722ab52b37248a6b128fd1ae79c32acb7816e0229628f49bafc8f8ea",
+    "iptoasn-country": "47f9d0e7ad8ad6e7a97528b856b42380cf96da2bd8fa5fa8a6c5b062afa724c0",
+    "origin-asn": "a6b66cae34776ef4e2c5e5dd04d7cdf72c24eb4ddad4d81f4c18ecc4a0e69926",
+    "user-country": "a6fee9536266abe05bb6b0c34b5215728b85d1f92ceef3390b24a0e5f5f8d9d5",
+    "server-country": "b805045135bdc211cb3216b4ff7605c50ab85e66d92fceda3673ff47c13b5b97"
   },
   "datasets": [
     {
       "key": "dbip-city",
       "variant": "",
       "name": "DBIP-City-Lite",
-      "file": "dbip-city-lite.mmdb.xz",
+      "file": "dbip-city-lite",
+      "parts": [
+        "dbip-city-lite.mmdb.part001.zst",
+        "dbip-city-lite.mmdb.part002.zst",
+        "dbip-city-lite.mmdb.part003.zst",
+        "dbip-city-lite.mmdb.part004.zst",
+        "dbip-city-lite.mmdb.part005.zst",
+        "dbip-city-lite.mmdb.part006.zst"
+      ],
+      "part_sizes": [
+        22000000,
+        22000000,
+        22000000,
+        22000000,
+        22000000,
+        17339927
+      ],
+      "codec": "zst",
       "kind": "city",
       "database_type": "DBIP-City-Lite",
       "license": "CC BY 4.0",
@@ -53,16 +70,28 @@
         "location"
       ],
       "redistributable": true,
-      "size": 39737108,
+      "size": 127339927,
+      "part_bytes": [
+        22000000,
+        22000000,
+        22000000,
+        22000000,
+        22000000,
+        17339927
+      ],
+      "packaged_size": 51518248,
       "build_date": "2026-09-01",
-      "sha256": "1e40ebf147ab622e5808d150b0ba53d046f88ac4070d1f2c6a911b4087165a08",
-      "packaged_at": "2026-09-17T20:33:56Z"
+      "sha256": "05a10861259c7966cb54d7181ef8c360de8c8829d182098c0e62a9b7d54cd50d",
+      "packaged_at": "2026-09-17T23:50:40Z"
     },
     {
       "key": "dbip-asn",
       "variant": "",
       "name": "DBIP-ASN-Lite",
-      "file": "dbip-asn-lite.mmdb.xz",
+      "file": "dbip-asn-lite",
+      "parts": [],
+      "part_sizes": [],
+      "codec": null,
       "kind": "asn",
       "database_type": "DBIP-ASN-Lite",
       "license": "CC BY 4.0",
@@ -72,16 +101,21 @@
         "asn"
       ],
       "redistributable": true,
-      "size": 3319304,
+      "size": 9511026,
+      "part_bytes": [],
+      "packaged_size": 3319304,
       "build_date": "2026-09-01",
-      "sha256": "4549eb83428979d9bd0141cb56f93446c8c3ce35faf852eb6deb27f19f2cfc12",
-      "packaged_at": "2026-09-17T20:33:57Z"
+      "sha256": "ab07c764a10c4f8c2f3539377fa86e5c928243084aafd359d1be4cb8543d7406",
+      "packaged_at": "2026-09-17T23:50:40Z"
     },
     {
       "key": "dbip-country",
       "variant": "",
       "name": "DBIP-Country-Lite",
-      "file": "dbip-country-lite.mmdb.xz",
+      "file": "dbip-country-lite",
+      "parts": [],
+      "part_sizes": [],
+      "codec": null,
       "kind": "country",
       "database_type": "DBIP-Country-Lite",
       "license": "CC BY 4.0",
@@ -92,16 +126,27 @@
         "continent"
       ],
       "redistributable": true,
-      "size": 2252408,
+      "size": 8340464,
+      "part_bytes": [],
+      "packaged_size": 2252408,
       "build_date": "2026-09-01",
-      "sha256": "9072012177b4c9dc3655732f1fc7fa6a66cffa63b8e1aa5ae229c7ad48ba9a9a",
-      "packaged_at": "2026-09-17T20:33:58Z"
+      "sha256": "d284ae2e7427fe33d83465e1506b2b21aae47eb8a9b099f8f4dac6a98c99f041",
+      "packaged_at": "2026-09-17T23:50:41Z"
     },
     {
       "key": "geolite2-city",
       "variant": "ipv4",
       "name": "GeoLite2-City",
-      "file": "geolite2-city-ipv4.mmdb.xz",
+      "file": "geolite2-city-ipv4",
+      "parts": [
+        "geolite2-city-ipv4.mmdb.part001.zst",
+        "geolite2-city-ipv4.mmdb.part002.zst"
+      ],
+      "part_sizes": [
+        22000000,
+        5754576
+      ],
+      "codec": "zst",
       "kind": "city",
       "database_type": "GeoLite2-City",
       "license": "GeoLite2 EULA (MaxMind)",
@@ -116,16 +161,30 @@
         "postal"
       ],
       "redistributable": false,
-      "size": 10626440,
+      "size": 27754576,
+      "part_bytes": [
+        22000000,
+        5754576
+      ],
+      "packaged_size": 14142202,
       "build_date": "2026-09-16",
-      "sha256": "c9fcf0df252bbcbb923bfd6384d7a0bc9d56e75edb86daff6794d594f68902fb",
-      "packaged_at": "2026-09-17T20:33:59Z"
+      "sha256": "6494ceedc53e75b7dbf60b5d7932c10a375ac6a598bd10c71ea93bcbec38d7ba",
+      "packaged_at": "2026-09-17T23:50:44Z"
     },
     {
       "key": "geolite2-city",
       "variant": "ipv6",
       "name": "GeoLite2-City",
-      "file": "geolite2-city-ipv6.mmdb.xz",
+      "file": "geolite2-city-ipv6",
+      "parts": [
+        "geolite2-city-ipv6.mmdb.part001.xz",
+        "geolite2-city-ipv6.mmdb.part002.xz"
+      ],
+      "part_sizes": [
+        12000000,
+        5259503
+      ],
+      "codec": "xz",
       "kind": "city",
       "database_type": "GeoLite2-City",
       "license": "GeoLite2 EULA (MaxMind)",
@@ -140,16 +199,30 @@
         "postal"
       ],
       "redistributable": false,
-      "size": 4742076,
+      "size": 17259503,
+      "part_bytes": [
+        12000000,
+        5259503
+      ],
+      "packaged_size": 4757216,
       "build_date": "2026-09-16",
-      "sha256": "9b1968a1dd3fbab2d5a1a5cde59c0a0ef7571598904ed137bf5a8868247bd104",
-      "packaged_at": "2026-09-17T20:34:00Z"
+      "sha256": "3ac0ef57e9ec071f9d70003ebb38cfe0475b6017da960fb666754e0ef0ca00cc",
+      "packaged_at": "2026-09-17T23:50:45Z"
     },
     {
       "key": "geolite2-asn",
       "variant": "",
       "name": "GeoLite2-ASN",
-      "file": "geolite2-asn.mmdb.xz",
+      "file": "geolite2-asn",
+      "parts": [
+        "geolite2-asn.mmdb.part001.xz",
+        "geolite2-asn.mmdb.part002.xz"
+      ],
+      "part_sizes": [
+        12000000,
+        99059
+      ],
+      "codec": "xz",
       "kind": "asn",
       "database_type": "GeoLite2-ASN",
       "license": "GeoLite2 EULA (MaxMind)",
@@ -159,16 +232,24 @@
         "asn"
       ],
       "redistributable": false,
-      "size": 3814164,
+      "size": 12099059,
+      "part_bytes": [
+        12000000,
+        99059
+      ],
+      "packaged_size": 3818512,
       "build_date": "2026-09-16",
-      "sha256": "dccbfaff8964344394f995474262ef511de2bc93b6407dee68875586547ebe96",
-      "packaged_at": "2026-09-17T20:34:01Z"
+      "sha256": "b25192d6b0168db663d314fd3dfce9aed4057cd9bd2aa2ee50f585af83eedc1d",
+      "packaged_at": "2026-09-17T23:50:46Z"
     },
     {
       "key": "geolite2-country",
       "variant": "",
       "name": "GeoLite2-Country",
-      "file": "geolite2-country.mmdb.xz",
+      "file": "geolite2-country",
+      "parts": [],
+      "part_sizes": [],
+      "codec": null,
       "kind": "country",
       "database_type": "GeoLite2-Country",
       "license": "GeoLite2 EULA (MaxMind)",
@@ -179,16 +260,21 @@
         "continent"
       ],
       "redistributable": false,
-      "size": 2113864,
+      "size": 8395961,
+      "part_bytes": [],
+      "packaged_size": 2113864,
       "build_date": "2026-09-16",
-      "sha256": "5996b63fcf92133bec0f275dbdacd532ede4224a8c45acd98d0570125bafe8e0",
-      "packaged_at": "2026-09-17T20:34:01Z"
+      "sha256": "b620ae586ddb935df11bb3d037563c9bafd4ff8e14e9d6c3c6505b8063990797",
+      "packaged_at": "2026-09-17T23:50:47Z"
     },
     {
       "key": "iptoasn-asn",
       "variant": "",
       "name": "IPtoASN-ASN",
-      "file": "iptoasn-asn.mmdb.xz",
+      "file": "iptoasn-asn",
+      "parts": [],
+      "part_sizes": [],
+      "codec": null,
       "kind": "asn",
       "database_type": "IPtoASN-ASN",
       "license": "PDDL",
@@ -198,16 +284,21 @@
         "asn"
       ],
       "redistributable": true,
-      "size": 3363244,
+      "size": 9624579,
+      "part_bytes": [],
+      "packaged_size": 3363244,
       "build_date": "2026-09-16",
-      "sha256": "2334af1ca890f4185280625144ded1e36a91ac621ea1155cdb8f25ce3726435c",
-      "packaged_at": "2026-09-17T20:34:02Z"
+      "sha256": "22cf1d44722ab52b37248a6b128fd1ae79c32acb7816e0229628f49bafc8f8ea",
+      "packaged_at": "2026-09-17T23:50:48Z"
     },
     {
       "key": "iptoasn-country",
       "variant": "",
       "name": "IPtoASN-Country",
-      "file": "iptoasn-country.mmdb.xz",
+      "file": "iptoasn-country",
+      "parts": [],
+      "part_sizes": [],
+      "codec": null,
       "kind": "country",
       "database_type": "IPtoASN-Country",
       "license": "PDDL",
@@ -217,16 +308,21 @@
         "country"
       ],
       "redistributable": true,
-      "size": 1316752,
+      "size": 5246393,
+      "part_bytes": [],
+      "packaged_size": 1316752,
       "build_date": "2026-09-16",
-      "sha256": "1564e4ec760fcf0abc907e8cc563415527b89015b1f905ffcd0d6e844d1fc735",
-      "packaged_at": "2026-09-17T20:34:02Z"
+      "sha256": "47f9d0e7ad8ad6e7a97528b856b42380cf96da2bd8fa5fa8a6c5b062afa724c0",
+      "packaged_at": "2026-09-17T23:50:48Z"
     },
     {
       "key": "origin-asn",
       "variant": "",
       "name": "Origin-ASN",
-      "file": "origin-asn.mmdb.xz",
+      "file": "origin-asn",
+      "parts": [],
+      "part_sizes": [],
+      "codec": null,
       "kind": "asn",
       "database_type": "Origin-ASN",
       "license": "PDDL",
@@ -236,16 +332,21 @@
         "asn"
       ],
       "redistributable": true,
-      "size": 3714768,
+      "size": 10522671,
+      "part_bytes": [],
+      "packaged_size": 3714768,
       "build_date": "2026-09-16",
-      "sha256": "23bb902a7d121459850d1d3faa30a729709a68139862024762b65553ac12f536",
-      "packaged_at": "2026-09-17T20:34:03Z"
+      "sha256": "a6b66cae34776ef4e2c5e5dd04d7cdf72c24eb4ddad4d81f4c18ecc4a0e69926",
+      "packaged_at": "2026-09-17T23:50:49Z"
     },
     {
       "key": "user-country",
       "variant": "",
       "name": "User-Country",
-      "file": "user-country.mmdb.xz",
+      "file": "user-country",
+      "parts": [],
+      "part_sizes": [],
+      "codec": null,
       "kind": "country",
       "database_type": "User-Country",
       "license": "PDDL",
@@ -255,16 +356,21 @@
         "country"
       ],
       "redistributable": true,
-      "size": 1904952,
+      "size": 7605413,
+      "part_bytes": [],
+      "packaged_size": 1904952,
       "build_date": "2026-09-16",
-      "sha256": "c3a63771a3ad7c0572b5355c9ddc72cd84f5e19f4aca1b738571fdc3c9960294",
-      "packaged_at": "2026-09-17T20:34:03Z"
+      "sha256": "a6fee9536266abe05bb6b0c34b5215728b85d1f92ceef3390b24a0e5f5f8d9d5",
+      "packaged_at": "2026-09-17T23:50:50Z"
     },
     {
       "key": "server-country",
       "variant": "",
       "name": "Server-Country",
-      "file": "server-country.mmdb.xz",
+      "file": "server-country",
+      "parts": [],
+      "part_sizes": [],
+      "codec": null,
       "kind": "country",
       "database_type": "Server-Country",
       "license": "PDDL",
@@ -274,10 +380,12 @@
         "country"
       ],
       "redistributable": true,
-      "size": 1767128,
+      "size": 6947507,
+      "part_bytes": [],
+      "packaged_size": 1767128,
       "build_date": "2026-09-16",
-      "sha256": "8db8acb9eb66fa264d28070d61536d42e95ef82e76dbff9f128c116bcbb6116a",
-      "packaged_at": "2026-09-17T20:34:04Z"
+      "sha256": "b805045135bdc211cb3216b4ff7605c50ab85e66d92fceda3673ff47c13b5b97",
+      "packaged_at": "2026-09-17T23:50:51Z"
     }
   ]
 }

@@ -20,6 +20,7 @@ import json
 import lzma
 import os
 import shutil
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
@@ -31,7 +32,12 @@ from .databases import (
     NON_REDISTRIBUTABLE_KEYS,
     DatasetSpec,
     MemberSpec,
+    _archive_kind,
+    _open_archive,
+    _part_siblings,
+    concat_parts,
     ensure_extracted,
+    part_info,
     sha256_of,
 )
 from .exceptions import DownloadError
@@ -346,10 +352,22 @@ def _database_build_date(path: Path) -> Optional[str]:
 
 
 def _local_candidates(target_dir: Path, member: MemberSpec) -> List[Path]:
-    """Every local file that represents this member, whatever its compression."""
+    """Every local file that represents this member, whatever its compression.
+
+    Split artefacts count too: ``<stem>.mmdb.part001.xz`` … ``partNNN.xz``.
+    """
     stem = member_stem(member)
-    names = [member.filename, f"{stem}.mmdb", f"{stem}.mmdb.gz", f"{stem}.mmdb.xz"]
-    return [target_dir / name for name in dict.fromkeys(names)]
+    names = [
+        member.filename,
+        f"{stem}.mmdb",
+        f"{stem}.mmdb.gz",
+        f"{stem}.mmdb.xz",
+        f"{stem}.mmdb.zst",
+    ]
+    candidates = [target_dir / name for name in dict.fromkeys(names)]
+    if target_dir.is_dir():
+        candidates.extend(sorted(target_dir.glob(f"{stem}.mmdb.part*.??")))
+    return [item for item in candidates if item.is_file() and part_info(item.name) is None] or candidates
 
 
 def write_manifest(target_dir: "str | os.PathLike", datasets: Sequence[str] = ()) -> Path:
@@ -363,19 +381,64 @@ def write_manifest(target_dir: "str | os.PathLike", datasets: Sequence[str] = ()
             continue
         for member in spec.members:
             existing = [item for item in _local_candidates(target_dir, member) if item.is_file()]
-            if not existing:
+            parts = _part_siblings(target_dir, member)
+            if not existing and not parts:
                 continue
-            candidate = max(existing, key=lambda item: item.stat().st_mtime)
-            stat = candidate.stat()
-            build_date = _database_build_date(candidate) or datetime.fromtimestamp(
-                stat.st_mtime, tz=timezone.utc
+            parts.sort(key=lambda item: part_info(item.name)[1])  # type: ignore[index]
+            packaged = parts[0] if parts else max(existing, key=lambda item: item.stat().st_mtime)
+            part_sizes: List[int] = []
+            with tempfile.TemporaryDirectory(prefix="detector-manifest-") as tmp:
+                if parts:
+                    # Sha256 / size / build date describe the database, not the
+                    # packaging, so the split artefact is assembled once here - and
+                    # the uncompressed size of every part is recorded so the runtime
+                    # can write the parts straight to their offsets.
+                    assembled = Path(tmp) / member_stem(member)
+                    try:
+                        part_sizes = []
+                        with open(assembled, "wb") as dst:
+                            for part in parts:
+                                size = 0
+                                with _open_archive(part, _archive_kind(part)) as src:
+                                    while True:
+                                        block = src.read(1 << 22)
+                                        if not block:
+                                            break
+                                        dst.write(block)
+                                        size += len(block)
+                                part_sizes.append(size)
+                    except Exception:
+                        assembled = None  # type: ignore[assignment]
+                else:
+                    if _archive_kind(packaged) is None:
+                        assembled = packaged
+                    else:
+                        assembled = Path(tmp) / member_stem(member)
+                        try:
+                            concat_parts([packaged], assembled)
+                        except Exception:
+                            assembled = None  # type: ignore[assignment]
+
+                if assembled is not None and Path(assembled).is_file():
+                    size = Path(assembled).stat().st_size
+                    digest = sha256_of(Path(assembled))
+                    build_date = _database_build_date(Path(assembled))
+                else:  # pragma: no cover - fall back to the packaged bytes
+                    size = packaged.stat().st_size
+                    digest = sha256_of(packaged)
+                    build_date = None
+            fallback_time = datetime.fromtimestamp(
+                packaged.stat().st_mtime, tz=timezone.utc
             ).strftime("%Y-%m-%d")
             entries.append(
                 {
                     "key": key,
                     "variant": member.variant,
                     "name": spec.name,
-                    "file": candidate.name,
+                    "file": member_stem(member),
+                    "parts": [item.name for item in parts],
+                    "part_sizes": part_sizes,
+                    "codec": (_archive_kind(parts[0]) if parts else None),
                     "kind": spec.kind,
                     "database_type": spec.name,
                     "license": spec.license,
@@ -383,9 +446,14 @@ def write_manifest(target_dir: "str | os.PathLike", datasets: Sequence[str] = ()
                     "homepage": spec.homepage,
                     "providers": list(spec.providers),
                     "redistributable": spec.redistributable,
-                    "size": stat.st_size,
-                    "build_date": build_date,
-                    "sha256": sha256_of(candidate),
+                    "size": size,
+                    "part_bytes": part_sizes,
+                    "packaged_size": sum(
+                        item.stat().st_size
+                        for item in (parts or [max(existing, key=lambda i: i.stat().st_mtime)])
+                    ),
+                    "build_date": build_date or fallback_time,
+                    "sha256": digest,
                     "packaged_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
                 }
             )

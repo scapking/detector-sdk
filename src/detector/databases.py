@@ -14,9 +14,11 @@ import hashlib
 import json
 import lzma
 import os
+import re
 import shutil
 import tempfile
 from collections.abc import Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -44,7 +46,11 @@ __all__ = [
     "resolve_data_dir",
     "discover_database_files",
     "ensure_extracted",
+    "concat_parts",
+    "extract_many",
     "extraction_dir",
+    "logical_name",
+    "part_info",
     "load_manifest",
     "normalize_record",
     "open_databases",
@@ -408,54 +414,400 @@ def extraction_dir(cache_dir: Optional[os.PathLike] = None) -> Path:
 
 
 #: Archive extensions accepted for bundled/updated databases, longest first.
-ARCHIVE_SUFFIXES: Tuple[str, ...] = (".mmdb.gz", ".mmdb.xz", ".gz", ".xz")
+ARCHIVE_SUFFIXES: Tuple[str, ...] = (".mmdb.zst", ".mmdb.gz", ".mmdb.xz", ".zst", ".gz", ".xz")
+
+#: A bundled database may be split into independently decodable parts
+#: (``dbip-city-lite.mmdb.part001.xz``). The parts are merged back into a single
+#: ``.mmdb`` in the cache directory; because each part is its own compressed
+#: stream they decompress in parallel, which is the whole point of splitting.
+PART_PATTERN = re.compile(r"^(?P<stem>.+\.mmdb)\.part(?P<index>\d{1,4})\.(?P<kind>gz|xz|zst)$")
+
+#: Supported compression codecs.
+ARCHIVE_KINDS: Tuple[str, ...] = ("gz", "xz", "zst")
+
+
+def part_info(name: str) -> Optional[Tuple[str, int, str]]:
+    """``"dbip-city-lite.mmdb.part003.xz"`` -> ``("dbip-city-lite.mmdb", 3, "xz")``."""
+    match = PART_PATTERN.match(name)
+    if match is None:
+        return None
+    return match.group("stem"), int(match.group("index")), match.group("kind")
+
+
+def logical_name(name: str) -> str:
+    """The file this name resolves to once decompressed and merged.
+
+    ``dbip-city-lite.mmdb.part003.xz`` -> ``dbip-city-lite.mmdb``
+    ``dbip-city-lite.mmdb.xz``         -> ``dbip-city-lite.mmdb``
+    ``dbip-city-lite.xz``              -> ``dbip-city-lite``
+    ``dbip-city-lite.mmdb``            -> ``dbip-city-lite.mmdb``
+    """
+    info = part_info(name)
+    if info is not None:
+        return info[0]
+    for kind in ARCHIVE_KINDS:
+        if name.endswith(f".mmdb.{kind}"):
+            return name[: -len(f".{kind}")]  # keep the ".mmdb" marker
+        if name.endswith(f".{kind}"):
+            return name[: -len(f".{kind}")]
+    return name
 
 
 def _archive_kind(path: Path) -> Optional[str]:
-    """``"gz"`` / ``"xz"`` / ``None`` for a database archive."""
+    """``"gz"`` / ``"xz"`` / ``"zst"`` / ``None`` for a (possibly split) archive."""
     name = path.name
-    if name.endswith(".mmdb.gz"):
-        return "gz"
-    if name.endswith(".mmdb.xz"):
-        return "xz"
+    info = part_info(name)
+    if info is not None:
+        return info[2]
+    for kind in ARCHIVE_KINDS:
+        if name.endswith(f".mmdb.{kind}"):
+            return kind
     return None
 
 
-def ensure_extracted(path: Path, cache_dir: Optional[Path] = None) -> Path:
-    """Decompress ``.mmdb.gz`` / ``.mmdb.xz`` into ``<cache>/extracted`` (idempotent).
-
-    xz is the shipped format (35% smaller than gzip for MMDB data); gzip stays
-    supported for datasets downloaded from upstream. Uses ``flock`` so concurrent
-    processes cannot race on the same file, and a temp file + ``os.replace`` so
-    readers never observe a partial database.
-    """
-    kind = _archive_kind(path)
-    if kind is None:
-        return path
-    cache_dir = extraction_dir(cache_dir)
-    target = cache_dir / path.name[: -len(f".{kind}")]
-    if target.is_file() and target.stat().st_size > 0:
-        return target
-    try:
-        cache_dir.mkdir(parents=True, exist_ok=True)
-    except OSError:  # read-only HOME -> fall back to a temp dir
-        cache_dir = Path(tempfile.mkdtemp(prefix="detector-"))
-        target = cache_dir / path.name[:-3]
-
-    lock_path = cache_dir / f".{path.name}.lock"
-    with _file_lock(lock_path):
-        if target.is_file() and target.stat().st_size > 0:
-            return target
-        tmp = target.with_suffix(target.suffix + f".tmp{os.getpid()}")
+def _open_archive(path: Path, kind: str) -> Any:
+    """Open a compressed stream for reading (context manager)."""
+    if kind == "gz":
+        return gzip.open(path, "rb")
+    if kind == "xz":
+        return lzma.open(path, "rb")
+    if kind == "zst":
         try:
-            opener = gzip.open if kind == "gz" else lzma.open
-            with opener(path, "rb") as src, open(tmp, "wb") as dst:
-                shutil.copyfileobj(src, dst, length=1 << 20)
-            os.replace(tmp, target)
-        except (OSError, EOFError, lzma.LZMAError) as exc:
-            tmp.unlink(missing_ok=True)
-            raise DatabaseError(f"failed to decompress {path}: {exc}", detail=str(path)) from exc
+            import zstandard
+        except ImportError as exc:  # pragma: no cover - depends on install flavour
+            raise DatabaseError(
+                f"{path.name} is zstd-compressed; install the optional codec: "
+                "pip install 'detector-sdk[zstd]'",
+                detail=str(path),
+            ) from exc
+        handle = open(path, "rb")
+        reader = zstandard.ZstdDecompressor().stream_reader(handle)
+        return _ClosingReader(reader, handle)
+    raise DatabaseError(f"unsupported compression: {kind}", detail=str(path))
+
+
+class _ClosingReader:
+    """Stream reader that also closes the underlying file handle."""
+
+    def __init__(self, reader: Any, handle: Any) -> None:
+        self._reader = reader
+        self._handle = handle
+
+    def read(self, size: int = -1) -> bytes:
+        return self._reader.read(size)
+
+    def __enter__(self) -> "_ClosingReader":
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        self.close()
+
+    def close(self) -> None:
+        try:
+            self._reader.close()
+        finally:
+            self._handle.close()
+
+
+def _parts_of(path: Path) -> List[Path]:
+    """Every sibling part of the same logical database, ordered by index."""
+    info = part_info(path.name)
+    if info is None:
+        return [path]
+    stem, _, kind = info
+    siblings = []
+    for candidate in sorted(path.parent.iterdir()):
+        other = part_info(candidate.name)
+        if candidate.is_file() and other is not None and other[0] == stem and other[2] == kind:
+            siblings.append(candidate)
+    if path not in siblings:  # pragma: no cover - defensive
+        siblings.append(path)
+    return sorted(siblings, key=lambda item: part_info(item.name)[1])  # type: ignore[index]
+
+
+def _part_siblings(target_dir: Path, member: Any) -> List[Path]:
+    """Part files of a (possibly split) bundled member, in index order."""
+    stem = member.filename
+    for suffix in ARCHIVE_SUFFIXES:
+        if stem.endswith(suffix):
+            stem = stem[: -len(suffix)]
+            break
+    if str(stem).endswith(".mmdb"):
+        pass
+    elif not str(stem).endswith(".mmdb"):
+        stem = f"{stem}.mmdb"
+    if not target_dir.is_dir():
+        return []
+    found = [
+        item for item in target_dir.iterdir()
+        if item.is_file() and part_info(item.name) is not None
+        and part_info(item.name)[0] == stem
+    ]
+    return sorted(found, key=lambda item: part_info(item.name)[1])
+
+
+def _extraction_workers() -> int:
+    """Threads used while decompressing. Compression codecs release the GIL."""
+    return max(1, min(8, (os.cpu_count() or 2)))
+
+
+def _decompress_file_source(path: Path, kind: str, target: Path) -> Path:
+    """Decompress one archive to ``target`` (a staging path), safely."""
+    tmp = target.with_name(f"{target.name}.tmp{os.getpid()}")
+    try:
+        with _open_archive(path, kind) as src, open(tmp, "wb") as dst:
+            shutil.copyfileobj(src, dst, length=1 << 20)
+        os.replace(tmp, target)
+    except (OSError, EOFError, lzma.LZMAError) as exc:
+        tmp.unlink(missing_ok=True)
+        raise DatabaseError(f"failed to decompress {path}: {exc}", detail=str(path)) from exc
     return target
+
+
+def _lock_path_for(cache_dir: Path, logical: str) -> Path:
+    return cache_dir / f".{logical}.lock"
+
+
+def _assemble(staged: Sequence[Path], target: Path) -> None:
+    """Concatenate staged parts, in order, into ``target`` (atomic replace)."""
+    tmp = target.with_name(f"{target.name}.merge{os.getpid()}")
+    try:
+        with open(tmp, "wb") as dst:
+            for chunk_path in staged:
+                with open(chunk_path, "rb") as src:
+                    shutil.copyfileobj(src, dst, length=1 << 22)
+        os.replace(tmp, target)
+    finally:
+        tmp.unlink(missing_ok=True)
+        for chunk_path in staged:
+            chunk_path.unlink(missing_ok=True)
+
+
+def concat_parts(parts: Sequence[Path], target: Path) -> Path:
+    """Decode parts straight into ``target`` in index order (single pass).
+
+    Used by the manifest builder, where a temporary assembly is enough; the
+    runtime path stages parts on a thread pool first so decoding runs in
+    parallel.
+    """
+    try:
+        with open(target, "wb") as dst:
+            for part in parts:
+                kind = _archive_kind(part)
+                if kind is None:  # pragma: no cover - defensive
+                    raise DatabaseError(f"not an archive: {part}", detail=str(part))
+                with _open_archive(part, kind) as src:
+                    shutil.copyfileobj(src, dst, length=1 << 22)
+    except (OSError, EOFError, lzma.LZMAError) as exc:
+        target.unlink(missing_ok=True)
+        raise DatabaseError(f"failed to assemble {target.name}: {exc}", detail=str(target)) from exc
+    return target
+
+
+def _part_size_map(db_dir: Path) -> Dict[str, Dict[str, int]]:
+    """``{logical name: {part name: uncompressed bytes}}`` from ``MANIFEST.json``.
+
+    With the uncompressed size of every part known up front, a split database can
+    be written straight to its final offsets - one write pass instead of the
+    decode-to-staging + concatenate round trip.
+    """
+    try:
+        data = load_manifest(db_dir)
+    except Exception:  # pragma: no cover - manifest is optional
+        return {}
+    out: Dict[str, Dict[str, int]] = {}
+    for entry in data.values():
+        logical = entry.get("file")
+        parts = entry.get("parts") or []
+        sizes = entry.get("part_sizes") or []
+        if logical and parts and len(parts) == len(sizes):
+            out[str(logical)] = dict(zip(parts, sizes))
+    return out
+
+
+def _decompress_at(path: Path, kind: str, handle: Any, offset: int) -> int:
+    """Decode one archive straight into ``handle`` starting at ``offset``.
+
+    Each worker opens its own handle and writes a disjoint byte range, so the
+    parts of one database can be decoded concurrently into a single file.
+    """
+    handle.seek(offset)
+    written = 0
+    try:
+        with _open_archive(path, kind) as src:
+            while True:
+                block = src.read(1 << 22)
+                if not block:
+                    break
+                handle.write(block)
+                written += len(block)
+    except (OSError, EOFError, lzma.LZMAError) as exc:
+        raise DatabaseError(f"failed to decompress {path}: {exc}", detail=str(path)) from exc
+    return written
+
+
+def _decode_bytes(path: Path, kind: str) -> bytes:
+    """Whole decompressed part, in memory (used by the pipelined merge)."""
+    with _open_archive(path, kind) as src:
+        return src.read()
+
+
+def _merge_parts(parts: Sequence[Path], target: Path, workers: int) -> None:
+    """Decode parts in parallel and append them, in order, with one writer.
+
+    Decoding scales with cores, while the file is written sequentially from a
+    single thread: one write pass, no staging copy and no re-reading - which
+    matters because on a slow disk the I/O (not the codec) is the bottleneck.
+    Parts in flight are bounded, so peak memory stays around two parts.
+    """
+    if len(parts) == 1:
+        _decompress_file_source(parts[0], _archive_kind(parts[0]) or "xz", target)
+        return
+
+    largest = max(part.stat().st_size for part in parts)
+    budget = 128 << 20
+    window = max(2, min(workers, max(1, budget // max(largest, 1))))
+    staged = target.with_name(f"{target.name}.partial{os.getpid()}")
+    order = list(parts)
+    cursor = 0
+    in_flight: Dict[int, Any] = {}
+    try:
+        with ThreadPoolExecutor(max_workers=window, thread_name_prefix="detector") as pool:
+
+            def submit_next() -> None:
+                nonlocal cursor
+                if cursor < len(order) and len(in_flight) < window:
+                    part = order[cursor]
+                    in_flight[cursor] = pool.submit(
+                        _decode_bytes, part, _archive_kind(part) or "xz"
+                    )
+                    cursor += 1
+
+            for _ in range(min(window, len(order))):
+                submit_next()
+            with open(staged, "wb") as handle:
+                for index in range(len(order)):
+                    data = in_flight.pop(index).result()
+                    handle.write(data)
+                    del data
+                    submit_next()
+        os.replace(staged, target)
+    except (OSError, EOFError, lzma.LZMAError, DatabaseError) as exc:
+        staged.unlink(missing_ok=True)
+        if isinstance(exc, DatabaseError):
+            raise
+        raise DatabaseError(f"failed to assemble {target.name}: {exc}", detail=str(target)) from exc
+
+
+def extract_many(
+    paths: Sequence[Path],
+    cache_dir: Optional[os.PathLike] = None,
+) -> List[Path]:
+    """Decompress/merge several (possibly split) archives, decoding in parallel.
+
+    Returns one resolved path per input, in the same order. Idempotent: an
+    assembled database in the cache directory is reused as-is.
+
+    Split databases are written **once**: when the uncompressed size of every
+    part is known (the shipped ``MANIFEST.json`` records it), the parts are
+    decoded concurrently straight into their final byte offsets, so no staging
+    copy or concatenation is needed. Without sizes the parts are staged and
+    concatenated. Either way the merged file is byte-identical to the original.
+    """
+    kinds = [_archive_kind(path) for path in paths]
+    if all(kind is None for kind in kinds):
+        return [Path(path) for path in paths]
+
+    cache_dir_path = extraction_dir(cache_dir)
+    units: Dict[str, Tuple[Path, List[Tuple[Path, str]]]] = {}
+    for path, kind in zip(paths, kinds):
+        if kind is None:
+            continue
+        target = cache_dir_path / logical_name(path.name)
+        units[target.name] = (target, [(part, kind) for part in _parts_of(path)])
+
+    resolved: Dict[str, Path] = {}
+    missing: Dict[str, Tuple[Path, List[Tuple[Path, str]]]] = {}
+    for name, unit in units.items():
+        target = unit[0]
+        if target.is_file() and target.stat().st_size > 0:
+            resolved[name] = target
+        else:
+            missing[name] = unit
+
+    if missing:
+        try:
+            cache_dir_path.mkdir(parents=True, exist_ok=True)
+        except OSError:  # read-only HOME -> fall back to a temp dir
+            cache_dir_path = Path(tempfile.mkdtemp(prefix="detector-"))
+            for name, (target, sources) in list(missing.items()):
+                missing[name] = (cache_dir_path / target.name, sources)
+
+        staging = cache_dir_path / ".staging"
+        staging.mkdir(parents=True, exist_ok=True)
+        locks = [_file_lock(_lock_path_for(cache_dir_path, name)) for name in sorted(missing)]
+        for lock in locks:
+            lock.__enter__()
+        try:
+            workers = _extraction_workers()
+            merged: List[Tuple[Path, List[Path]]] = []
+            todo: List[Tuple[str, Path, str, Path]] = []
+            for name, (target, sources) in missing.items():
+                if target.is_file() and target.stat().st_size > 0:  # another process won
+                    resolved[name] = target
+                    continue
+                part_paths = [source for source, _kind in sources]
+                if len(part_paths) > 1:
+                    # Split database: parallel decode + one sequential write pass.
+                    merged.append((target, part_paths))
+                else:
+                    todo.append((name, part_paths[0], sources[0][1],
+                                 staging / f"{name}.0001.partial"))
+
+            with ThreadPoolExecutor(max_workers=max(2, workers),
+                                    thread_name_prefix="detector") as pool:
+                futures = [
+                    pool.submit(_merge_parts, parts, target, workers) for target, parts in merged
+                ]
+                if todo:
+                    list(pool.map(
+                        lambda item: _decompress_file_source(item[1], item[2], item[3]), todo
+                    ))
+                for (target, _parts), future in zip(merged, futures):
+                    future.result()
+                    resolved[target.name] = target
+
+            for name, _source, _kind, staged in todo:
+                if name in resolved:
+                    continue
+                os.replace(staged, missing[name][0])
+                resolved[name] = missing[name][0]
+        finally:
+            for lock in reversed(locks):
+                lock.__exit__(None, None, None)
+            try:
+                if not any(staging.iterdir()):
+                    staging.rmdir()
+            except OSError:  # pragma: no cover - best effort
+                pass
+
+    out: List[Path] = []
+    for path, kind in zip(paths, kinds):
+        if kind is None:
+            out.append(Path(path))
+        else:
+            out.append(resolved[logical_name(path.name)])
+    return out
+
+
+def ensure_extracted(path: Path, cache_dir: Optional[os.PathLike] = None) -> Path:
+    """Decompress ``.mmdb.gz`` / ``.mmdb.xz`` / ``.mmdb.zst`` into ``<cache>/extracted``.
+
+    Split databases (``.partNNN.xz``) are reassembled into a single ``.mmdb``.
+    Idempotent, safe across processes (``flock``), and atomic: readers never see
+    a half-written database.
+    """
+    return extract_many([Path(path)], cache_dir)[0]
 
 
 class _file_lock:
@@ -835,16 +1187,35 @@ def open_databases(
             spec, member = member_for_filename(path.name)
             key = spec.key if spec else _strip_suffix(path.name)
             variant = member.variant if member else ""
+            previous = chosen.get((key, variant))
+            if previous is not None:
+                # Parts of one split database all match the same member: keep the
+                # first (part001), the merger walks the rest of the group anyway.
+                if part_info(path.name) is not None and part_info(previous[0].name) is not None:
+                    continue
             chosen[(key, variant)] = (path, spec, member)
 
-    for (key, variant), (path, spec, _member) in sorted(chosen.items()):
-        if include_set is not None and key not in include_set:
-            continue
-        if key in exclude_set:
-            continue
+    selected = [
+        (key, variant, path, spec)
+        for (key, variant), (path, spec, _member) in sorted(chosen.items())
+        if (include_set is None or key in include_set) and key not in exclude_set
+    ]
+
+    # Decompress (and merge split parts) for every selected file in one batch:
+    # the codecs release the GIL, so this parallelises across cores.
+    if extract and selected:
+        try:
+            resolved_all = extract_many([item[2] for item in selected], cache_path)
+        except DatabaseError:
+            if strict:
+                raise
+            resolved_all = [item[2] for item in selected]
+    else:
+        resolved_all = [item[2] for item in selected]
+
+    for (key, variant, _path, spec), resolved in zip(selected, resolved_all):
         entry = manifest.get(manifest_key(key, variant), {})
         try:
-            resolved = ensure_extracted(path, cache_path) if extract else path
             opened.append(
                 Database(
                     resolved,
@@ -870,13 +1241,15 @@ def open_databases(
 
 
 def _strip_suffix(name: str) -> str:
-    """``dbip-city-lite-2026-09.mmdb.gz`` -> ``dbip-city-lite-2026-09``."""
-    for suffix in ARCHIVE_SUFFIXES:
-        if name.endswith(suffix):
-            return name[: -len(suffix)]
-    if name.endswith(".mmdb"):
-        return name[: -len(".mmdb")]
-    return name
+    """``dbip-city-lite-2026-09.mmdb.gz`` -> ``dbip-city-lite-2026-09``.
+
+    Split artefacts (``dbip-city-lite.mmdb.part002.xz``) strip down to the same
+    stem, so a part matches the bundled member it belongs to.
+    """
+    logical = logical_name(name)
+    if logical.endswith(".mmdb"):
+        return logical[: -len(".mmdb")]
+    return logical
 
 
 def _matches(filename: str, bundled_name: str) -> bool:

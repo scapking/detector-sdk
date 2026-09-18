@@ -2,14 +2,14 @@
 
     from detector import info, distance
 
-    await info("8.8.8.8")                       # -> IPInfo
-    await info(["8.8.8.8", "1.1.1.1"])          # -> [IPInfo, IPInfo]
-    await info(generator_of_millions)           # -> [IPInfo, ...]  windowed, bounded memory
-    await info("8.8.8.8", as_dict=True)         # -> dict (the standard JSON document)
+    await info("8.8.8.8")                       # -> dict (the standard JSON document)
+    await info(["8.8.8.8", "1.1.1.1"])          # -> [dict, dict]
+    await info(generator_of_millions)           # -> [dict, ...]  windowed, bounded memory
+    await info("8.8.8.8", as_object=True)       # -> IPInfo
 
-    await distance("8.8.8.8", "1.1.1.1")                       # -> Distance
-    await distance("8.8.8.8", ["1.1.1.1", "::1"])              # -> [Distance]
-    await distance(["8.8.8.8", "1.1.1.1"], ["::1", "9.9.9.9"]) # -> [Distance] (N x M)
+    await distance("8.8.8.8", "1.1.1.1")                       # -> dict
+    await distance("8.8.8.8", ["1.1.1.1", "::1"])              # -> [dict, dict]
+    await distance(["8.8.8.8", "1.1.1.1"], ["::1", "9.9.9.9"]) # -> [dict, ...] (N x M)
 
 Both entry points also accept the JSON envelope, so the same two functions cover
 the protocol case::
@@ -22,10 +22,16 @@ the protocol case::
 Everything configurable is passed per call, or once through :func:`configure`.
 Clients are pooled per option set, so repeated calls with the same options reuse
 one memory-mapped client instead of reopening the databases.
+
+First use unpacks the bundled databases into the cache directory (76 MB of
+compressed data -> 251 MB of MMDB files). Split archives are decoded in parallel,
+and :func:`warmup` lets you pay that cost up front - at import time in a
+container, or in the background while your application boots.
 """
 
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 import threading
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
@@ -34,7 +40,7 @@ from .aio import AsyncDetector
 from .distance import Distance
 from .models import IPInfo
 
-__all__ = ["info", "distance", "configure", "close"]
+__all__ = ["info", "distance", "warmup", "configure", "close"]
 
 #: Scalar inputs. Any other iterable is treated as a batch.
 _SCALARS = (
@@ -79,6 +85,84 @@ async def close() -> None:
             await client.aclose()
         except Exception:  # pragma: no cover - closing must never raise
             pass
+
+
+async def warmup(
+    *,
+    datasets: Optional[Iterable[str]] = None,
+    cache_dir: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Unpack the bundled databases now instead of on the first query.
+
+    First use decompresses ~76 MB of archives into ~251 MB of MMDB files. Split
+    archives decode in parallel; the whole cost is paid once per machine, because
+    later processes reuse the cache. Call this from a container build step, a
+    startup hook, or a background task if you care about first-query latency::
+
+        await warmup()                                # everything bundled
+        await warmup(datasets=["dbip-city", "dbip-asn"])
+
+    Returns a report::
+
+        {"files": 12, "parts": 27, "bytes": 250600000, "seconds": 2.4,
+         "cache_dir": "/root/.cache/detector/extracted", "already_ready": False}
+    """
+    return await asyncio.to_thread(_warmup_sync, datasets, cache_dir)
+
+
+def _warmup_sync(
+    datasets: Optional[Iterable[str]] = None,
+    cache_dir: Optional[str] = None,
+) -> Dict[str, Any]:
+    import time
+    from pathlib import Path
+
+    from .databases import (
+        _archive_kind,
+        discover_database_files,
+        extract_many,
+        extraction_dir,
+        logical_name,
+        member_for_filename,
+        part_info,
+    )
+
+    wanted = set(datasets) if datasets else None
+    unique: Dict[str, Any] = {}
+    for path in discover_database_files():
+        if _archive_kind(path) is None:
+            continue
+        spec, _member = member_for_filename(path.name)
+        if wanted is not None and (spec is None or spec.key not in wanted):
+            continue
+        logical = logical_name(path.name)
+        previous = unique.get(logical)
+        if previous is None:
+            unique[logical] = path
+            continue
+        info, old = part_info(path.name), part_info(previous.name)
+        if info is not None and (old is None or info[1] < old[1]):
+            unique[logical] = path
+    sources = list(unique.values())
+
+    target_dir = extraction_dir(cache_dir)
+    parts = sum(1 for path in sources if part_info(path.name) is not None)
+    ready_before = sum(
+        1 for logical in unique
+        if (target_dir / logical).is_file() and (target_dir / logical).stat().st_size > 0
+    )
+
+    started = time.perf_counter()
+    resolved = extract_many(sources, cache_dir)
+    elapsed = time.perf_counter() - started
+    return {
+        "files": len(sources),
+        "parts": parts,
+        "bytes": sum(Path(item).stat().st_size for item in resolved),
+        "seconds": round(elapsed, 3),
+        "cache_dir": str(target_dir),
+        "already_ready": bool(sources) and ready_before == len(sources),
+    }
 
 
 def _is_single(value: Any) -> bool:

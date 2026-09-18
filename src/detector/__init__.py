@@ -62,7 +62,7 @@ from .exceptions import (
     ProtocolError,
     UnsupportedActionError,
 )
-from .functions import close, configure, distance, info
+from .functions import close, configure, distance, info, warmup
 from .models import (
     ASN,
     DEFAULT_LOCALES,
@@ -89,6 +89,7 @@ __all__ = [
     # the two capabilities
     "info",
     "distance",
+    "warmup",
     # configuration and lifecycle
     "configure",
     "close",

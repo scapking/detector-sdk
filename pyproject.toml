@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "detector-sdk"
-version = "0.2.1"
+version = "0.2.2"
 description = "Offline IP intelligence SDK: one query merges every bundled dataset into a standardised English JSON document, plus IP-to-IP distance."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -24,7 +24,9 @@ classifiers = [
   "Topic :: Internet",
   "Topic :: Software Development :: Libraries :: Python Modules",
 ]
-dependencies = ["maxminddb>=2.4.0"]
+# maxminddb reads the MMDB files; zstandard decodes the shipped city databases
+# (zstd decodes ~7x faster than xz, which halves first-run unpacking time).
+dependencies = ["maxminddb>=2.4.0", "zstandard>=0.22"]
 
 [project.optional-dependencies]
 dev = ["pytest>=7.4", "ruff>=0.6"]

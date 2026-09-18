@@ -29,10 +29,12 @@ GeoLite2-City split never sees the wrong half.
 
 | metric | value |
 |---|---|
-| first ever `Detector()` (decompresses 76 MB of xz into ~230 MB of mmdb) | ~13 s |
+| first ever `Detector()` / `await warmup()` (90 MB of parts -> 251 MB of mmdb) | 12.6 s (2 cores, 25 MB/s disk) |
+| same, warm cache (later processes) | 12-17 ms |
+| `await warmup()` after the cache exists | 12 ms |
 | warm `Detector()` (files already extracted) | 10 ms |
 | resident set with 12 databases open | 30 MB |
-| cache directory after extraction | ~230 MB |
+| cache directory after extraction | 251 MB |
 | one result document with `raw` | ~9.8 KB |
 | same result with `include_raw=False, include_all_names=False` | ~5.8 KB |
 

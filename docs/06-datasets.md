@@ -1,6 +1,6 @@
 # 06 - Datasets, licences and updates
 
-## Everything ships (11 datasets, 12 files, 76 MB of xz)
+## Everything ships (11 datasets, 12 databases, ~90 MB of parts)
 
 | key | name | provides | licence | files | cadence |
 |---|---|---|---|---|---|
@@ -18,8 +18,9 @@
 
 Everything comes from the upstream [ip-location-db](https://github.com/sapics/ip-location-db)
 project, plus DB-IP's own endpoints for the DB-IP Lite trio. Data is stored as
-`.mmdb.xz`; the standard-library `lzma` module unpacks it into
-`<cache>/extracted/` on first use. `.mmdb.gz` and plain `.mmdb` files (what
+Either a whole `.mmdb.xz`/`.mmdb.zst`, or a set of `.mmdb.partNNN.xz|zst` parts
+for the big ones. `lzma`/`zstandard` unpack them into `<cache>/extracted/` on
+first use: parts decode in parallel and are merged into one MMDB file. `.mmdb.gz` and plain `.mmdb` files (what
 upstream serves) are understood as well.
 
 ## The GeoLite2 licence problem

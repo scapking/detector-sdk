@@ -16,7 +16,7 @@ await distance("8.8.8.8", "1.1.1.1")     # -> dict
 await distance("8.8.8.8", ["1.1.1.1", "223.5.5.5"])   # -> [dict, dict]
 ```
 
-* **11 datasets bundled** (every dataset ip-location-db publishes), 76 MB of xz,
+* **11 datasets bundled** (every dataset ip-location-db publishes), ~90 MB packaged,
   read through memory-mapped MMDB files
 * **Multi-source merge** with `cross_check` / `agreement` / `conflicts` so you can
   see which source said what before trusting a value
@@ -36,8 +36,10 @@ pip install detector-sdk        # distribution name; the import name is `detecto
 pip install .                   # from a checkout
 ```
 
-The databases ship inside the wheel. First use decompresses them into
-`~/.cache/detector/extracted` (override with `DETECTOR_CACHE_DIR`) — ~230 MB of
+The databases ship inside the wheel, split into independently compressed parts.
+First use decompresses and merges them into `~/.cache/detector/extracted`
+(override with `DETECTOR_CACHE_DIR`) — 251 MB of plain MMDB files, one write pass,
+parts decoded in parallel. Pay that cost up front with `await warmup()`:
 MMDB across 12 files. Reading is memory-mapped, so RAM stays low (~30 MB with
 everything loaded).
 
@@ -213,7 +215,9 @@ while sending an IPv6 literal is an error, not a silent mismatch.
 their data on to third parties. Drop them with
 `Detector(exclude=NON_REDISTRIBUTABLE_KEYS)` if you are publishing.
 
-Files are stored as `.mmdb.xz` (xz beats gzip by ~35% on MMDB data and the
+Files ship as `.mmdb.partNNN.xz` / `.mmdb.partNNN.zst` (xz/zstd; a split
+database is decoded part-by-part on a thread pool and merged back into one file
+whose sha256 is recorded in MANIFEST.json). `.mmdb.xz` (whole, xz beats gzip by ~35% on MMDB data and the
 standard-library `lzma` module unpacks it). Loaded files also carry their address
 family, so a v6-only GeoLite2 half is never consulted for an IPv4 address.
 
@@ -276,6 +280,7 @@ Fresh files in the cache directory override the bundled copies automatically.
 * Lookups are memory-mapped: 12 databases open cost ~30 MB RSS, and the 127 MB
   city database never lands in your heap.
 * Warm startup is ~10 ms; the very first run decompresses the bundled data
+  (12.6 s on a 2-core box with a 25 MB/s disk, ~3 s on 8 cores + NVMe)
   (~13 s).
 * A default lookup is ~477 µs (2.1k IP/s) over 11 datasets / 12 files; ~40 µs
   when the address is already in the LRU cache.

@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.2.2
+
+* Bundled databases are shipped **split into independently compressed parts**
+  (``dbip-city-lite.mmdb.part001.zst`` …). ``extract_many`` decodes the parts on
+  a thread pool and merges them into one MMDB file, so first-run unpacking uses
+  every core instead of one - and the merged file is byte-identical to the
+  original database.
+* The largest databases ship as **zstd** (``zstandard`` is now a dependency):
+  zstd decodes ~7x faster than the xz archives used before.
+* New ``warmup()`` coroutine: unpack the bundled data up front (container build,
+  startup hook, background task) instead of on the first query.
+* ``AsyncDetector`` gained ``dataset_keys`` / ``database_uids``.
+
+
 ## 0.2.1
 
 * **`info()` and `distance()` now return the standard JSON document (a plain
