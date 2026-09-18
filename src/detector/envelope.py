@@ -43,7 +43,7 @@ from .distance import Distance
 from .exceptions import InvalidIPError, IPIntelError, ProtocolError, UnsupportedActionError
 from .models import SCHEMA_VERSION, JsonModel
 
-__all__ = ["Request", "Response", "handle", "loads", "ACTION_ALIASES", "TYPE_ALIASES"]
+__all__ = ["Request", "Response", "handle", "error_response", "loads", "ACTION_ALIASES", "TYPE_ALIASES"]
 
 #: Input-only aliases. Responses always use the canonical English name.
 ACTION_ALIASES: Dict[str, str] = {
@@ -284,6 +284,35 @@ def handle(detector: Detector, payload: Any) -> Response:
             error={"code": "internal_error", "message": str(exc)},
             meta=_meta(detector, started),
         )
+
+
+def error_response(
+    exc: IPIntelError,
+    payload: Any = None,
+    *,
+    meta: Optional[Dict[str, Any]] = None,
+) -> Response:
+    """Protocol-shaped error for failures that happen *before* handling starts.
+
+    Used when the database set is not ready yet (``loading_timeout``) or cannot be
+    opened at all: the caller still gets ``{type, action, status, error, meta}``
+    instead of an exception, so the envelope contract holds.
+    """
+    type_ = "auto"
+    action = "unknown"
+    try:
+        if isinstance(payload, Request):
+            request = payload
+        elif isinstance(payload, Mapping):
+            request = Request.from_dict(payload)
+        else:
+            request = Request.from_dict(loads(payload))
+        type_, action = request.type, request.action
+    except Exception:
+        pass
+    return Response(
+        type=type_, action=action, status="error", error=exc.to_dict(), meta=dict(meta or {})
+    )
 
 
 def _handle_info(detector: Detector, request: Request, declared: Optional[int]) -> Any:

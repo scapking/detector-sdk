@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "detector-sdk"
-version = "0.2.2"
+version = "0.3.0"
 description = "Offline IP intelligence SDK: one query merges every bundled dataset into a standardised English JSON document, plus IP-to-IP distance."
 readme = "README.md"
 requires-python = ">=3.9"

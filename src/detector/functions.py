@@ -34,13 +34,16 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import threading
+from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 
 from .aio import AsyncDetector
 from .distance import Distance
+from .envelope import error_response, handle
+from .exceptions import IPIntelError
 from .models import IPInfo
 
-__all__ = ["info", "distance", "warmup", "configure", "close"]
+__all__ = ["info", "distance", "warmup", "ready", "progress", "configure", "close"]
 
 #: Scalar inputs. Any other iterable is treated as a batch.
 _SCALARS = (
@@ -56,6 +59,50 @@ _SCALARS = (
 _clients: Dict[Tuple[Any, ...], AsyncDetector] = {}
 _defaults: Dict[str, Any] = {}
 _lock = threading.Lock()
+
+#: One :class:`~detector.preparation.Preparation` per cache directory: ``warmup()``,
+#: ``ready()``, ``progress()`` and the import-time kick-off all share it.
+_preparations: Dict[str, Any] = {}
+_prep_lock = threading.Lock()
+
+
+def _preparation(cache_dir: Optional[str] = None, datasets: Optional[Iterable[str]] = None) -> Any:
+    """The shared preparation for this cache directory (same instance a client uses)."""
+    from .databases import user_cache_dir
+    from .preparation import shared_preparation
+
+    resolved = Path(cache_dir).expanduser() if cache_dir else user_cache_dir()
+    # Same identity as Detector builds, so warmup()/ready()/progress() observe the
+    # very same background preparation the client uses.
+    return shared_preparation(
+        cache_dir=resolved,
+        datasets=list(datasets) if datasets else None,
+        extra_dirs=[resolved],
+        extract=True,
+    )
+
+
+def _init_mode() -> str:
+    import os
+
+    return (os.environ.get("DETECTOR_INIT") or "lazy").strip().lower()
+
+
+def _env_defaults() -> Dict[str, Any]:
+    """Environment overrides applied to every call: DETECTOR_WAIT_TIMEOUT, ..."""
+    import os
+
+    out: Dict[str, Any] = {}
+    timeout = os.environ.get("DETECTOR_WAIT_TIMEOUT")
+    if timeout:
+        try:
+            out["wait_timeout"] = float(timeout)
+        except ValueError:
+            pass
+    on_timeout = os.environ.get("DETECTOR_ON_TIMEOUT")
+    if on_timeout:
+        out["on_timeout"] = on_timeout.strip().lower()
+    return out
 
 
 def configure(**options: Any) -> None:
@@ -94,17 +141,21 @@ async def warmup(
 ) -> Dict[str, Any]:
     """Unpack the bundled databases now instead of on the first query.
 
-    First use decompresses ~76 MB of archives into ~251 MB of MMDB files. Split
-    archives decode in parallel; the whole cost is paid once per machine, because
-    later processes reuse the cache. Call this from a container build step, a
-    startup hook, or a background task if you care about first-query latency::
+    Unpacking is unavoidable once per machine (~90 MB of parts -> 251 MB of MMDB
+    files). It is *progressive*: the cheapest databases (country/ASN) become
+    queryable in a fraction of a second while the big city file is still being
+    written, and the actual work happens in a background thread.
 
-        await warmup()                                # everything bundled
-        await warmup(datasets=["dbip-city", "dbip-asn"])
+    This coroutine starts that work (if it is not running yet) and waits for all
+    of it, so it belongs in a container build step, a start-up hook, or a
+    background task::
+
+        await warmup()                                 # everything bundled
+        await warmup(datasets=["dbip-city", "dbip-asn"])   # only these
 
     Returns a report::
 
-        {"files": 12, "parts": 27, "bytes": 250600000, "seconds": 2.4,
+        {"files": 12, "parts": 20, "bytes": 250600000, "seconds": 10.8,
          "cache_dir": "/root/.cache/detector/extracted", "already_ready": False}
     """
     return await asyncio.to_thread(_warmup_sync, datasets, cache_dir)
@@ -115,54 +166,60 @@ def _warmup_sync(
     cache_dir: Optional[str] = None,
 ) -> Dict[str, Any]:
     import time
-    from pathlib import Path
 
-    from .databases import (
-        _archive_kind,
-        discover_database_files,
-        extract_many,
-        extraction_dir,
-        logical_name,
-        member_for_filename,
-        part_info,
-    )
-
-    wanted = set(datasets) if datasets else None
-    unique: Dict[str, Any] = {}
-    for path in discover_database_files():
-        if _archive_kind(path) is None:
-            continue
-        spec, _member = member_for_filename(path.name)
-        if wanted is not None and (spec is None or spec.key not in wanted):
-            continue
-        logical = logical_name(path.name)
-        previous = unique.get(logical)
-        if previous is None:
-            unique[logical] = path
-            continue
-        info, old = part_info(path.name), part_info(previous.name)
-        if info is not None and (old is None or info[1] < old[1]):
-            unique[logical] = path
-    sources = list(unique.values())
-
-    target_dir = extraction_dir(cache_dir)
-    parts = sum(1 for path in sources if part_info(path.name) is not None)
-    ready_before = sum(
-        1 for logical in unique
-        if (target_dir / logical).is_file() and (target_dir / logical).stat().st_size > 0
-    )
-
+    prep = _preparation(cache_dir, datasets)
     started = time.perf_counter()
-    resolved = extract_many(sources, cache_dir)
+    already = prep.finished or prep.is_ready()
+    prep.wait(None)
     elapsed = time.perf_counter() - started
+    progress = prep.progress()
     return {
-        "files": len(sources),
-        "parts": parts,
-        "bytes": sum(Path(item).stat().st_size for item in resolved),
-        "seconds": round(elapsed, 3),
-        "cache_dir": str(target_dir),
-        "already_ready": bool(sources) and ready_before == len(sources),
+        "files": progress["ready"],
+        "parts": sum(1 for unit in prep._units if len(unit.paths) > 1),
+        "bytes": sum(
+            unit.resolved.stat().st_size for unit in prep._units if unit.resolved is not None
+        ),
+        "seconds": round(elapsed if not already else 0.0, 3),
+        "cache_dir": progress["cache_dir"],
+        "already_ready": bool(already),
+        "failed": progress["failed"],
     }
+
+
+async def ready(timeout: Optional[float] = None, *, wait: str = "all", **options: Any) -> bool:
+    """Is the database set ready to answer complete queries?
+
+    ::
+
+        await ready()               # blocks until everything is unpacked
+        await ready(2.0)            # -> False if still loading after two seconds
+        await ready(wait="any")     # -> True as soon as the first database is up
+
+    Cheap to call in a health check, and never raises: failures are reported by
+    :func:`progress` (``failed``), not by an exception.
+    """
+    cache_dir = options.get("cache_dir")
+    datasets = options.get("datasets")
+    if not cache_dir and not datasets:
+        prep = _preparation(None, None)
+        return await asyncio.to_thread(prep.wait_for_any if wait == "any" else prep.wait, timeout)
+    prep = _preparation(cache_dir, datasets)
+    return await asyncio.to_thread(prep.wait_for_any if wait == "any" else prep.wait, timeout)
+
+
+async def progress(**options: Any) -> Dict[str, Any]:
+    """Snapshot of the preparation: readiness, per-database timings, failures.
+
+    ::
+
+        {"ready": 12, "total": 12, "loading": False, "complete": True,
+         "failed": {}, "pending": [], "timings": {"dbip-country": 0.31, ...},
+         "seconds": 10.8, "cache_dir": "/root/.cache/detector/extracted"}
+    """
+    prep = _preparation(options.get("cache_dir"), options.get("datasets"))
+    snapshot = dict(prep.progress())
+    snapshot["init"] = _init_mode()
+    return snapshot
 
 
 def _is_single(value: Any) -> bool:
@@ -200,9 +257,28 @@ def _hashable(value: Any) -> Any:
     return repr(value)
 
 
+async def _auto_init() -> None:
+    """Kick off unpacking according to ``DETECTOR_INIT``.
+
+    ``lazy`` (default)  - first ``info()``/``distance()`` call pays the cost
+    ``import``          - start in a background thread as soon as the module loads
+    ``blocking``        - finish unpacking before ``import detector`` returns
+    ``off``             - never do it implicitly (only ``warmup()``/``ready()``)
+    """
+    mode = _init_mode() or "lazy"
+    if mode in ("lazy", "off", "0", "false", "no", ""):
+        return
+    prep = _preparation()
+    if mode == "blocking":
+        prep.start()
+        prep.wait(None)
+    elif mode in ("import", "background", "thread"):
+        prep.start()
+
+
 async def _client(**options: Any) -> AsyncDetector:
     """A live client for this option set, created and pooled on demand."""
-    merged = {**_defaults, **options}
+    merged = {**_env_defaults(), **_defaults, **options}
     key = tuple(sorted((name, _hashable(value)) for name, value in merged.items()))
     with _lock:
         client = _clients.get(key)
@@ -247,9 +323,13 @@ async def info(target: Any, *, as_object: bool = False, **options: Any) -> Any:
     ``list[IPInfo]``, or :class:`~detector.envelope.Response`.
     """
     if _is_envelope(target):
-        from .envelope import handle
-
-        response = handle((await _client(**options)).sync, _protocol_payload(target))
+        payload = _protocol_payload(target)
+        try:
+            response = handle((await _client(**options)).sync, payload)
+        except IPIntelError as exc:
+            # Databases not ready yet (load timeout) or failed to open: keep the
+            # envelope contract and answer with status="error" instead of raising.
+            response = error_response(exc, payload)
         return _out(response, as_object)
 
     client = await _client(**options)
@@ -280,9 +360,11 @@ async def distance(
     ``method`` selects the maths: ``"haversine"`` (default) or ``"vincenty"``.
     """
     if _is_envelope(source):
-        from .envelope import handle
-
-        response = handle((await _client(**options)).sync, _protocol_payload(source))
+        payload = _protocol_payload(source)
+        try:
+            response = handle((await _client(**options)).sync, payload)
+        except IPIntelError as exc:
+            response = error_response(exc, payload)
         return _out(response, as_object)
 
     client = await _client(**options)

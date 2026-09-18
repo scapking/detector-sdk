@@ -100,6 +100,29 @@ class AsyncDetector:
     def databases(self) -> List[Any]:
         return self._geo.databases
 
+    async def ready(self, timeout: Optional[float] = None, *, wait: str = "all") -> bool:
+        """Is the database set ready? Never raises: use :meth:`progress` for detail.
+
+        ``wait="all"`` (default) waits for every dataset; ``wait="any"`` returns
+        as soon as the first one is unpacked, which is what a latency-sensitive
+        health check wants.
+        """
+        prep = self._geo.preparation
+        if prep is None:
+            return True
+        loop = asyncio.get_running_loop()
+        call = prep.wait_for_any if wait == "any" else prep.wait
+        return bool(await loop.run_in_executor(self._executor, functools.partial(call, timeout)))
+
+    async def progress(self) -> Dict[str, Any]:
+        """Preparation snapshot: ready/total, loading flag, failures, timings."""
+        prep = self._geo.preparation
+        if prep is None:
+            return {"ready": len(self._geo.databases), "total": len(self._geo.databases),
+                    "loading": False, "complete": True, "failed": {}, "pending": [],
+                    "timings": {}, "seconds": 0.0, "cache_dir": str(self._geo.cache_dir)}
+        return prep.progress()
+
     @property
     def dataset_keys(self) -> List[str]:
         """Loaded dataset keys, de-duplicated."""

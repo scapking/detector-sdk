@@ -50,12 +50,13 @@ from .databases import (
     user_cache_dir,
 )
 from .distance import Distance, distance_between, get_method
-from .exceptions import InvalidIPError
+from .exceptions import DatabaseError, InvalidIPError, NoDatabaseError
 from .models import (
     DEFAULT_LOCALES,
     SCHEMA_VERSION,
     IPInfo,
 )
+from .preparation import Preparation, shared_preparation
 
 __all__ = ["Detector", "IPLike", "parse_ip"]
 
@@ -169,6 +170,9 @@ class Detector:
         include_raw: bool = True,
         include_cross_check: bool = True,
         include_all_names: bool = True,
+        wait: str = "all",
+        wait_timeout: Optional[float] = None,
+        on_timeout: str = "partial",
     ) -> None:
         self.locales: Tuple[str, ...] = tuple(locales)
         self.distance_method = distance_method
@@ -185,17 +189,53 @@ class Detector:
         # Datasets refreshed by `update_datasets()` land in the cache directory and
         # override the bundled copies carrying the same dataset key.
         dirs = [self.cache_dir, *(Path(item).expanduser() for item in (extra_dirs or ()))]
-        self._databases: List[Database] = open_databases(
-            db_dir=db_dir,
-            databases=databases,
-            cache_dir=self.cache_dir,
-            load_mode=load_mode,
-            extract=extract,
-            strict=strict,
-            include=datasets,
-            exclude=exclude,
-            extra_dirs=dirs,
-        )
+        self._datasets_filter = tuple(datasets) if datasets else None
+        self._exclude_filter = tuple(exclude or ())
+        self._wait = (wait or "all").lower()
+        self._on_timeout = (on_timeout or "partial").lower()
+        self._opened_logicals: set = set()
+        self._refresh_lock = threading.Lock()
+        self._prep: Optional[Preparation] = None
+
+        if databases:
+            # Explicit files win: no discovery, no preparation involved.
+            self._databases: List[Database] = list(
+                open_databases(
+                    databases=databases,
+                    cache_dir=self.cache_dir,
+                    load_mode=load_mode,
+                    extract=extract,
+                    strict=strict,
+                )
+            )
+        elif extract:
+            self._prep = shared_preparation(
+                db_dir=db_dir,
+                cache_dir=self.cache_dir,
+                datasets=datasets,
+                exclude=exclude,
+                extra_dirs=dirs,
+                extract=True,
+            )
+            self._prep.start()
+            self._databases = []
+            self._open_ready(prepare_all=(self._wait != "none"))
+            if wait_timeout is not None or self._wait in ("all", "any"):
+                self._apply_wait_policy(wait_timeout)
+        else:
+            self._databases = list(
+                open_databases(
+                    db_dir=db_dir,
+                    databases=None,
+                    cache_dir=self.cache_dir,
+                    load_mode=load_mode,
+                    extract=False,
+                    strict=strict,
+                    include=datasets,
+                    exclude=exclude,
+                    extra_dirs=dirs,
+                )
+            )
         self._by_kind: Dict[str, List[Database]] = {}
         for db in self._databases:
             self._by_kind.setdefault(db.info.kind, []).append(db)
@@ -273,9 +313,158 @@ class Detector:
 
     def _meta_for(self, locales: Optional[Sequence[str]] = None) -> Dict[str, Any]:
         """Per-result metadata. ``databases`` is a shared read-only list."""
+        self._maybe_refresh()
         meta = dict(self._meta_base)
         meta["locales"] = list(locales or self.locales)
+        if self._prep is not None:
+            meta["preparation"] = self._prep.readiness()
+            failed = self._prep.failed
+            if failed:
+                meta["datasets_failed"] = dict(failed)
         return meta
+
+    # ------------------------------------------------------------------ #
+    # Preparation (progressive unpacking)
+    # ------------------------------------------------------------------ #
+
+    def _apply_wait_policy(self, wait_timeout: Optional[float]) -> None:
+        """Honour ``wait`` / ``wait_timeout`` / ``on_timeout`` before returning."""
+        prep = self._prep
+        if prep is None:
+            return
+        policy = self._wait
+        if policy == "none":
+            satisfied = prep.ready_count > 0
+        elif policy == "any":
+            satisfied = prep.wait_for_any(wait_timeout)
+        else:
+            satisfied = prep.wait(wait_timeout)
+        if satisfied:
+            self._open_ready()
+            self._raise_if_strict(prep)
+            prep.fail_if_empty()
+            if not self._databases:
+                raise NoDatabaseError("every database failed to load")
+            return
+        if self._on_timeout == "error":
+            raise prep.timeout_error(wait_timeout)
+        # partial: answer with what is ready and keep loading in the background
+        self._open_ready()
+        self._raise_if_strict(prep)
+        if not self._databases:
+            prep.wait(None)
+            self._open_ready()
+        prep.fail_if_empty()
+        if not self._databases:
+            raise NoDatabaseError("every database failed to load")
+
+    def _raise_if_strict(self, prep: Preparation) -> None:
+        """``strict=True`` means "a broken dataset is an error", not a warning."""
+        if self.strict and prep.failed:
+            labels = ", ".join(sorted(prep.failed))
+            raise DatabaseError(
+                f"failed to prepare {labels}", detail=prep.failed[sorted(prep.failed)[0]]
+            )
+
+    def _open_ready(self, prepare_all: bool = False) -> None:
+        """Open the databases that are unpacked *now*, appending the new ones.
+
+        Called once from the constructor and again lazily from ``_maybe_refresh``
+        when the background preparation finishes more units - re-opening is just
+        an ``mmap``, so incremental readiness costs microseconds per file.
+        """
+        prep = self._prep
+        if prep is None:
+            return
+        if prepare_all and not prep.started:
+            prep.start()
+        ready = prep.ready_paths()
+        pending = {name: path for name, path in ready.items() if name not in self._opened_logicals}
+        if not pending:
+            return
+        opened = open_databases(
+            db_dir=prep.db_dir,
+            cache_dir=self.cache_dir,
+            load_mode=self.load_mode,
+            extract=False,
+            strict=self.strict,
+            prepared=pending,
+            extra_dirs=prep.extra_dirs,
+        )
+        for db in opened:
+            self._opened_logicals.add(db.path.name)
+        self._databases.extend(opened)
+        self._reindex()
+        cache = getattr(self, "_cache", None)
+        if cache is not None and opened:
+            # Results computed with fewer databases must not survive: more data
+            # means a fuller answer.
+            cache.clear()
+
+    def _reindex(self) -> None:
+        self._databases.sort(key=lambda db: (db.priority, db.info.key))
+        self._by_kind = {}
+        for db in self._databases:
+            self._by_kind.setdefault(db.info.kind, []).append(db)
+        self._meta = describe_licenses(self._databases)
+        self._meta_base = {
+            "schema_version": SCHEMA_VERSION,
+            "databases": self._meta["databases"],
+            "attribution": self._meta["attribution"],
+        }
+
+    def _maybe_refresh(self) -> None:
+        """Pick up datasets unpacked by the background thread since the last call."""
+        prep = self._prep
+        if prep is None or (not self._databases and not prep.started):
+            return
+        if len(self._opened_logicals) >= prep.ready_count:
+            return
+        with self._refresh_lock:
+            self._open_ready()
+
+    def refresh(self) -> Dict[str, Any]:
+        """Re-scan the data directories and (re)open everything.
+
+        Useful after :func:`~detector.update_datasets` drops newer files into the
+        cache directory: the refreshed dataset replaces the bundled one, exactly
+        like a fresh client would see it.
+        """
+        prep = self._prep
+        if prep is None:
+            self._databases = list(
+                open_databases(
+                    db_dir=self.db_dir,
+                    cache_dir=self.cache_dir,
+                    load_mode=self.load_mode,
+                    extract=False,
+                    strict=self.strict,
+                    include=self._datasets_filter,
+                    exclude=self._exclude_filter,
+                    extra_dirs=[self.cache_dir],
+                )
+            )
+            self._reindex()
+            return {"databases": len(self._databases), "preparation": None}
+        for db in self._databases:
+            try:
+                db.close()
+            except Exception:  # pragma: no cover - closing must never raise
+                pass
+        self._databases = []
+        self._opened_logicals = set()
+        prep._units = prep._scan()  # type: ignore[attr-defined]
+        prep._finished = False        # type: ignore[attr-defined]
+        prep._started = False         # type: ignore[attr-defined]
+        prep.start()
+        self._open_ready(prepare_all=True)
+        self._apply_wait_policy(None)
+        return {"databases": len(self._databases), "preparation": prep.progress()}
+
+    @property
+    def preparation(self) -> Optional[Preparation]:
+        """The background preparation, or ``None`` for explicit-file clients."""
+        return self._prep
 
     # ------------------------------------------------------------------ #
     # Lookup
@@ -291,6 +480,7 @@ class Detector:
         resolve_dns: Optional[bool] = None,
         include_raw: Optional[bool] = None,
     ) -> IPInfo:
+        self._maybe_refresh()
         """Look one IP up across every loaded database.
 
         Missing data is never an error: the result carries ``found=False`` and
@@ -439,6 +629,7 @@ class Detector:
         locales: Optional[Sequence[str]] = None,
         ignore_errors: bool = True,
     ) -> List[IPInfo]:
+        self._maybe_refresh()
         """Batch lookup: same length and order as the input.
 
         Sequential on purpose. Measured on an 8-core box with the full set of

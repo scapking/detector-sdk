@@ -105,7 +105,54 @@ await distance({"type": "ipv4", "action": "distance",
 # as_object=True gives the Response model instead
 ```
 
-### Distance result
+### Startup, readiness and loading policy
+
+First use unpacks ~90 MB of compressed parts into 251 MB of MMDB files, once per
+machine. That work is **progressive** (the cheapest databases answer first) and
+runs in a **background thread**, so it never has to sit on your critical path:
+
+```bash
+DETECTOR_INIT=import            # start unpacking as soon as `import detector` runs
+DETECTOR_INIT=blocking          # finish before the import returns
+DETECTOR_WAIT_TIMEOUT=1.0       # default deadline for a first query (seconds)
+DETECTOR_ON_TIMEOUT=partial     # answer with what's ready (or `error`)
+```
+
+```python
+import asyncio, detector
+from detector import Detector, ready, progress, info
+
+# explicit control:
+await detector.ready(2.0)       # True if everything is unpacked within 2s
+await detector.progress()       # {"ready": 12, "total": 12, "failed": {}, ...}
+
+# bound the first query instead of guessing:
+doc = await info("8.8.8.8",
+                 wait_timeout=1.0, on_timeout="partial")
+doc["meta"]["preparation"]      # {"ready": ..., "total": ..., "loading": bool, ...}
+
+# or ask the client directly:
+d = Detector(wait_timeout=1.0, on_timeout="partial")   # never blocks past 1s
+await d.ready(); d.refresh()    # reopen after update_datasets()
+```
+
+Semantics:
+
+* `wait="all"` (default) - a query blockes until every dataset is ready. With a
+  `wait_timeout` and `on_timeout="error"` it raises `LoadingTimeoutError`
+  (`.code == "loading_timeout"`, with `ready`/`total`/`missing`/`retry_after`)
+  instead of hanging; the unpacking keeps going, so a retry succeeds.
+* `on_timeout="partial"` - returns immediately with what is ready and marks the
+  answer `meta.preparation.loading: true`; later queries automatically see the
+  fuller dataset as the background thread finishes (`meta.preparation.complete`).
+* A dataset that fails to unpack is reported in `meta.preparation.failed` /
+  `progress()["failed"]` - the healthy databases still answer. `strict=True`
+  makes any failure an error. If nothing at all can be unpacked, a
+  `NoDatabaseError` is raised.
+* `import detector` never touches the data. Use `DETECTOR_INIT=import` (or the
+  `await warmup()` hook) to overlap it with your own start-up work.
+
+## Distance result
 
 ```python
 row = await distance("8.8.8.8", "1.1.1.1")

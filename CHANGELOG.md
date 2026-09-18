@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.3.0
+
+* Progressive, priority-ordered unpacking: the bundled databases are written to
+  disk cheapest-first in a background thread, so a country/ASN answer is ready
+  in a fraction of a second while the big city database finishes.
+* `DETECTOR_INIT=import|blocking|lazy|off` - optionally start unpacking at
+  `import detector`, overlapping it with your own start-up work.
+* Bounded first-query latency: `wait="all"|"any"|"none"`, `wait_timeout` and
+  `on_timeout="partial"|"error"`. `LoadingTimeoutError` carries
+  `ready`/`total`/`missing`/`retry_after`; the protocol returns
+  `status:"error", error.code:"loading_timeout"`.
+* `await ready(timeout=..., wait=...)` and `await progress()` to poll readiness;
+  results carry `meta.preparation` (ready/total/loading/complete/failed).
+* A broken dataset is reported, not fatal: other databases still answer and the
+  failure appears in `progress()["failed"]` / `meta.datasets_failed`
+  (`strict=True` upgrades it to an error).
+* `Detector.refresh()` re-scans and re-opens after `update_datasets()`.
+
+
 ## 0.2.2
 
 * Bundled databases are shipped **split into independently compressed parts**

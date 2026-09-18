@@ -1132,6 +1132,7 @@ def open_databases(
     load_mode: str = "auto",
     extract: bool = True,
     strict: bool = True,
+    prepared: Optional[Mapping[str, Path]] = None,
     include: Optional[Sequence[str]] = None,
     exclude: Optional[Sequence[str]] = None,
     extra_dirs: Optional[Sequence[os.PathLike]] = None,
@@ -1203,17 +1204,25 @@ def open_databases(
 
     # Decompress (and merge split parts) for every selected file in one batch:
     # the codecs release the GIL, so this parallelises across cores.
-    if extract and selected:
+    if prepared is not None:
+        # The caller (Preparation) unpacked the files; open exactly what is ready.
+        pairs = [
+            ((key, variant, path, spec), Path(prepared[logical_name(path.name)]))
+            for (key, variant, path, spec) in selected
+            if logical_name(path.name) in prepared
+        ]
+    elif extract and selected:
         try:
             resolved_all = extract_many([item[2] for item in selected], cache_path)
         except DatabaseError:
             if strict:
                 raise
             resolved_all = [item[2] for item in selected]
+        pairs = list(zip(selected, resolved_all))
     else:
-        resolved_all = [item[2] for item in selected]
+        pairs = [(item, item[2]) for item in selected]
 
-    for (key, variant, _path, spec), resolved in zip(selected, resolved_all):
+    for (key, variant, _path, spec), resolved in pairs:
         entry = manifest.get(manifest_key(key, variant), {})
         try:
             opened.append(
